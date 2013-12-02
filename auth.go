@@ -3,7 +3,10 @@
 package main
 
 import (
+	"bufio"
+	"crypto/rand"
 	"encoding/hex"
+	"io"
 	"strings"
 )
 
@@ -33,4 +36,35 @@ func twosComplement(p []byte) {
 			p[i]++
 		}
 	}
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+func GenerateSharedSecret() ([]byte, error) {
+	sharedSecret := make([]byte, 16)
+	if _, err := io.ReadFull(rand.Reader, sharedSecret); err != nil {
+		return nil, err
+	}
+	return sharedSecret, nil
+}
+
+func GenerateV4UUID() (string, error) {
+	src := bufio.NewReaderSize(rand.Reader, 1)
+	b := []byte("xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx")
+	vhex := "0123456789abcdef"
+	for i := range b {
+		switch b[i] {
+		case 'x', 'y':
+			byt, err := src.ReadByte()
+			if err != nil {
+				return "", err
+			}
+			digit := int(byt) % 16
+			if b[i] == 'y' {
+				digit = 8 + digit%4
+			}
+			b[i] = vhex[digit]
+		}
+	}
+	return string(b), nil
 }

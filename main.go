@@ -1,18 +1,49 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 )
 
+var (
+	username = flag.String("u", "", "Minecraft user name")
+	password = flag.String("p", "", "Minecraft password")
+	server   = flag.String("s", "", "Minecraft server address")
+)
+
 func main() {
-	//ss, err := NewServerStatus("shuttle-xpc.local", 25565)
-	//fmt.Println(ss, err)
+	flag.Parse()
 
-	u, p := Config.Get("username"), Config.GetSecret("password")
+	cfg, err := NewUserConfig(".mcbot-config")
+	if err != nil {
+		panic(err)
+	}
 
-	c, err := Connect("shuttle-xpc.local", 25565)
+	if *username != "" {
+		cfg.SetValue("username", *username)
+	}
+	if *password != "" {
+		cfg.SetSecret("password", *password)
+	}
+
+	if *server != "" {
+		cfg.SetValue("server", *server)
+	}
+
+	if cfg.Value("server") == "" {
+		cfg.SetValue("server", "localhost:25565")
+	}
+
+	if cfg.Value("username") == "" || cfg.Secret("password") == "" {
+		fmt.Println("missing server/username/password. Specify once to first to have them saved in config")
+		return
+	}
+
+	fmt.Println("Connecting", cfg.Value("server"))
+
+	c, err := Connect(cfg)
 	fmt.Println(err)
 
-	err = c.Login(u, p)
+	err = c.Login()
 	fmt.Println(err)
 }

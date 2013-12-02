@@ -15,11 +15,14 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 )
 
 type Conn struct {
-	addr    string
+	cfg     Config
+	host    string
 	port    int
 	c       net.Conn
 	r       *PacketReader
@@ -34,20 +37,56 @@ const (
 )
 
 var (
-	ErrPacketMismatch = errors.New("Packet id mismatch")
+	ErrPacketMismatch    = errors.New("Packet id mismatch")
+	ErrServerAddrInvalid = errors.New("Server address invalid")
+	ErrLoginMissing      = errors.New("Username or password missing")
+	ErrLoginFailed       = errors.New("Login failed")
 )
 
-func Connect(addr string, port int) (*Conn, error) {
-	nc, err := net.Dial("tcp", fmt.Sprintf("%s:%d", addr, port))
+func Connect(cfg Config) (*Conn, error) {
+
+	v := strings.SplitN(cfg.Value("server"), ":", 2)
+	host := v[0]
+	if len(host) == 0 {
+		return nil, ErrServerAddrInvalid
+	}
+	port := 25565
+	var err error
+	if len(v) > 0 {
+		port, err = strconv.Atoi(v[1])
+		if err != nil {
+			return nil, ErrServerAddrInvalid
+		}
+	}
+
+	u, p := cfg.Value("username"), cfg.Secret("password")
+	if u == "" || p == "" {
+		return nil, ErrLoginMissing
+	}
+
+	return dial(cfg, host, port)
+}
+
+func dial(cfg Config, host string, port int) (*Conn, error) {
+	nc, err := net.Dial("tcp", fmt.Sprintf("%s:%d", host, port))
 	if err != nil {
 		return nil, err
 	}
+	var (
+		sr io.Reader
+		sw io.Writer
+	)
+	sr, sw = nc, nc
+	if PACKETDEBUG {
+		sr, sw = NewDebugReader(sr, os.Stdout), NewDebugWriter(sw, os.Stdout)
+	}
 	c := &Conn{
-		addr,
+		cfg,
+		host,
 		port,
 		nc,
-		NewPacketReader(NewDebugReader(nc, os.Stdout)),
-		NewPacketWriter(NewDebugWriter(nc, os.Stdout)),
+		NewPacketReader(sr),
+		NewPacketWriter(sw),
 		make([]byte, bufLen),
 		make([]byte, bufLen),
 		0,
@@ -72,8 +111,8 @@ func (s *ServerStatus) String() string {
 	return fmt.Sprintf("%s %d/%d %s %s", s.Version.Name, s.Players.Online, s.Players.Max, s.Ping, s.Description)
 }
 
-func NewServerStatus(addr string, port int) (*ServerStatus, error) {
-	c, err := Connect(addr, port)
+func NewServerStatus(host string, port int) (*ServerStatus, error) {
+	c, err := dial(nil, host, port)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +130,7 @@ func (c *Conn) ServerStatus() (*ServerStatus, error) {
 
 	err := c.Send(Handshake{
 		ProtocolVersion: 4, // 1.7.2
-		ServerAddress:   c.addr,
+		ServerAddress:   c.host,
 		ServerPort:      uint16(c.port),
 		NextState:       StateStatus,
 	})
@@ -136,7 +175,7 @@ func (c *Conn) Ping() (t time.Duration, err error) {
 	return
 }
 
-func (c *Conn) Login(user, passwd string) error {
+func (c *Conn) Login() error {
 	/*
 		C->S : Handshake State=2
 		C->S : Login Start
@@ -147,21 +186,54 @@ func (c *Conn) Login(user, passwd string) error {
 		S->C : Login Success
 	*/
 
+	var err error
+
+	clientToken, accessToken := c.cfg.Value("clientToken"), c.cfg.Value("accessToken")
+
 	var ygg YggAuth
-	yr, err := ygg.Authenticate(user, passwd, "")
-	if err != nil {
-		return err
+	profile := LoadYggProfile(c.cfg)
+	if accessToken == "" || ygg.Validate(accessToken) != nil {
+		tryRefresh := true
+		if clientToken == "" {
+			clientToken, err = GenerateV4UUID()
+			if err != nil {
+				return err
+			}
+			c.cfg.SetValue("clientToken", clientToken)
+			tryRefresh = false
+		}
+		var yr *YggResponse
+		if tryRefresh {
+			yr, err = ygg.Refresh(clientToken, accessToken)
+			if err == nil {
+				fmt.Println("Access token refreshed.")
+			}
+		}
+		if yr == nil {
+			user, passwd := c.cfg.Value("username"), c.cfg.Secret("password")
+			yr, err = ygg.Authenticate(user, passwd, clientToken)
+			if err != nil {
+				return err
+			}
+			fmt.Println("Authenticated.")
+		}
+		clientToken, accessToken = yr.ClientToken, yr.AccessToken
+		c.cfg.SetValue("clientToken", clientToken)
+		c.cfg.SetValue("accessToken", accessToken)
+		profile = yr.SelectedProfile
+		SaveYggProfile(c.cfg, profile)
+	} else {
+		fmt.Println("Access token still valid.")
 	}
-	fmt.Println(yr.AccessToken)
 
 	err = c.Send(Handshake{
 		ProtocolVersion: 4, // 1.7.2
-		ServerAddress:   c.addr,
+		ServerAddress:   c.host,
 		ServerPort:      uint16(c.port),
 		NextState:       StateLogin,
 	})
 
-	err = c.Send(LoginStart{yr.SelectedProfile.Name})
+	err = c.Send(LoginStart{profile.Name})
 	if err != nil {
 		return err
 	}
@@ -172,8 +244,8 @@ func (c *Conn) Login(user, passwd string) error {
 	}
 	dumpJson(erq)
 
-	sharedSecret := make([]byte, 16)
-	if _, err = io.ReadFull(rand.Reader, sharedSecret); err != nil {
+	sharedSecret, err := GenerateSharedSecret()
+	if err != nil {
 		return err
 	}
 
@@ -195,8 +267,8 @@ func (c *Conn) Login(user, passwd string) error {
 
 	url := "https://sessionserver.mojang.com/session/minecraft/join"
 	jd, err := json.Marshal(map[string]interface{}{
-		"accessToken":     yr.AccessToken,
-		"selectedProfile": yr.SelectedProfile,
+		"accessToken":     accessToken,
+		"selectedProfile": profile,
 		"serverId":        sidSum,
 	})
 	if err != nil {
@@ -227,33 +299,59 @@ func (c *Conn) Login(user, passwd string) error {
 		SharedSecret: rsacipher.Encrypt(sharedSecret),
 		VerifyToken:  rsacipher.Encrypt(erq.VerifyToken),
 	})
+	if rsacipher.Error() != nil {
+		return rsacipher.Error()
+	}
 
-	//c.EnableCrypto(sharedSecret)
+	c.EnableCrypto(sharedSecret)
 
-	var ls LoginSuccess
-	if err = c.Recv(&ls); err != nil {
+	pkid, err := c.PeekId()
+	if err != nil {
 		return err
 	}
-	dumpJson(ls)
-	fmt.Println("UUID=", ls.UUID)
+
+	switch pkid {
+	case 0x00:
+		var d Disconnect
+		if err = c.Recv(&d); err != nil {
+			return err
+		}
+		fmt.Println("Disconnect:", string(d))
+		return ErrLoginFailed
+	default:
+		fmt.Println("Unexpected packet received, id:", pkid)
+		return ErrLoginFailed
+	case 0x02:
+		var ls LoginSuccess
+		if err = c.Recv(&ls); err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
 
 func (c *Conn) EnableCrypto(secret []byte) {
-	aescr, err := aes.NewCipher(secret)
+	aesc, err := aes.NewCipher(secret)
 	if err != nil {
 		panic(err)
 	}
-	sr := cipher.NewCFBDecrypter(aescr, secret)
-	c.r = NewPacketReader(NewDebugReader(cipher.StreamReader{sr, c.c}, os.Stdout))
-
-	aescw, err := aes.NewCipher(secret)
-	if err != nil {
-		panic(err)
+	var (
+		sr io.Reader
+		sw io.Writer
+	)
+	sr = cipher.StreamReader{
+		R: c.c,
+		S: newCFB8Decrypt(aesc, secret),
 	}
-	sw := cipher.NewCFBEncrypter(aescw, secret)
-	c.w = NewPacketWriter(NewDebugWriter(cipher.StreamWriter{sw, c.c, nil}, os.Stdout))
+	sw = cipher.StreamWriter{
+		W: c.c,
+		S: newCFB8Encrypt(aesc, secret),
+	}
+	if PACKETDEBUG {
+		sr, sw = NewDebugReader(sr, os.Stdout), NewDebugWriter(sw, os.Stdout)
+	}
+	c.r, c.w = NewPacketReader(sr), NewPacketWriter(sw)
 }
 
 type RSA_PKCS1v15 struct {
@@ -274,6 +372,9 @@ func (c *RSA_PKCS1v15) Encrypt(b []byte) []byte {
 		c.err = err
 	}
 	return o
+}
+func (c *RSA_PKCS1v15) Error() error {
+	return c.err
 }
 
 func (c *Conn) Send(p Packet) error {

@@ -11,6 +11,14 @@ type YggProfile struct {
 	Name string `json:"name"`
 }
 
+func LoadYggProfile(c Config) *YggProfile {
+	return &YggProfile{c.Value("profileId"), c.Value("profileName")}
+}
+func SaveYggProfile(c Config, p *YggProfile) {
+	c.SetValue("profileId", p.Id)
+	c.SetValue("profileName", p.Name)
+}
+
 type YggResponse struct {
 	AccessToken       string       `json:"accessToken,omitempty"`
 	ClientToken       string       `json:"clientToken,omitempty"`
@@ -84,6 +92,7 @@ func (y *YggAuth) Refresh(clientToken, accessToken string) (*YggResponse, error)
 	if err != nil {
 		return nil, err
 	}
+	dumpJson(resp)
 	if err = yggError(resp); err != nil {
 		return nil, err
 	}
@@ -106,35 +115,29 @@ func (y *YggAuth) SignOut(username, password string) (*YggResponse, error) {
 	return resp, nil
 }
 
-func (y *YggAuth) Invalidate(clientToken, accessToken string) (*YggResponse, error) {
+func (y *YggAuth) Invalidate(clientToken, accessToken string) error {
 	// Invalidate access tokens with a client/access token pair
-	// Returns None on success, otherwise error dict
+	// Returns nil on success, otherwise error
 	resp, err := y.request("/invalidate", yggPayload{
 		"accessToken": selStr(accessToken, y.accessToken),
 		"clientToken": selStr(clientToken, y.clientToken),
 	})
 	if err != nil {
-		return nil, err
+		return nil
 	}
-	if err = yggError(resp); err != nil {
-		return nil, err
-	}
-	return resp, nil
+	return yggError(resp)
 }
 
-func (y *YggAuth) Validate(accessToken string) (*YggResponse, error) {
+func (y *YggAuth) Validate(accessToken string) error {
 	// Check if an access token is valid
-	// Returns None on success (ie valid access token), otherwise error dict
+	// Returns nil on success (ie valid access token), otherwise error
 	resp, err := y.request("/validate", yggPayload{
 		"accessToken": selStr(accessToken, y.accessToken),
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if err = yggError(resp); err != nil {
-		return nil, err
-	}
-	return resp, nil
+	return yggError(resp)
 }
 
 func (y *YggAuth) request(endpoint string, payload interface{}) (*YggResponse, error) {

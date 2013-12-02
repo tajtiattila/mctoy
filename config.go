@@ -7,33 +7,108 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"io/ioutil"
 	"log"
 	"os"
 	"os/user"
-	"path"
+	path "path/filepath"
 )
 
-type config struct {
-	v map[string]string
+type Config interface {
+	Value(name string) string
+	SetValue(name, value string)
+
+	Secret(name string) string
+	SetSecret(name, value string)
+
+	GetAllKeys() []string
+	Clear()
 }
 
-func (c *config) Set(name, value string) {
-	c.v[name] = value
-	c.save()
+const (
+	ConfigFileMode = 0700
+)
+
+var (
+	ErrNoFileName = errors.New("Config: No filename")
+)
+
+type autoFileConfig struct {
+	v            map[string]string
+	autoFileName string
 }
-func (c *config) Get(name string) string {
+
+func NewMemoryConfig() Config {
+	return &autoFileConfig{make(map[string]string), ""}
+}
+
+func NewFileConfig(configPath string) (Config, error) {
+	absPath, err := path.Abs(configPath)
+	if err == nil {
+		return nil, err
+	}
+	return newFileConfig(absPath)
+}
+
+func NewUserConfig(configPath string) (Config, error) {
+	u, err := user.Current()
+	if err != nil {
+		return nil, err
+	}
+	return newFileConfig(path.Join(u.HomeDir, configPath))
+}
+
+func newFileConfig(absPath string) (Config, error) {
+	err := os.MkdirAll(path.Dir(absPath), ConfigFileMode)
+	if err != nil {
+		return nil, err
+	}
+	c := &autoFileConfig{make(map[string]string), absPath}
+	err = c.Load()
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////
+
+func (c *autoFileConfig) SetValue(name, value string) {
+	if old, ok := c.v[name]; ok && old == value {
+		// avoid save if nothing changed
+		return
+	}
+	c.v[name] = value
+	c.Save()
+}
+
+func (c *autoFileConfig) Value(name string) string {
 	if s, ok := c.v[name]; ok {
 		return s
 	}
 	return ""
 }
-func (c *config) SetSecret(name, value string) {
-	c.Set(name, c.Encrypt(value))
+
+func (c *autoFileConfig) SetSecret(name, value string) {
+	c.SetValue(name, c.Encrypt(value))
 }
-func (c *config) GetSecret(name string) string {
-	return c.Decrypt(c.Get(name))
+
+func (c *autoFileConfig) Secret(name string) string {
+	return c.Decrypt(c.Value(name))
+}
+
+func (c *autoFileConfig) GetAllKeys() []string {
+	keys := make([]string, 0, len(c.v))
+	for k := range c.v {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func (c *autoFileConfig) Clear() {
+	c.v = make(map[string]string)
 }
 
 const (
@@ -49,7 +124,7 @@ func makeCipherBlock(k []byte) cipher.Block {
 	return c
 }
 
-func (c *config) getCipherBlock() cipher.Block {
+func (c *autoFileConfig) getCipherBlock() cipher.Block {
 	if k, ok := c.v[cipherKey]; ok {
 		k, err := hex.DecodeString(k)
 		if err == nil && len(k) == cipherLen {
@@ -59,11 +134,11 @@ func (c *config) getCipherBlock() cipher.Block {
 	k := make([]byte, cipherLen)
 	io.ReadFull(rand.Reader, k)
 	c.v[cipherKey] = hex.EncodeToString(k)
-	c.save()
+	c.Save()
 	return makeCipherBlock(k)
 }
 
-func (c *config) Encrypt(plaintext string) string {
+func (c *autoFileConfig) Encrypt(plaintext string) string {
 	buf := make([]byte, aes.BlockSize+len(plaintext))
 	iv, rest := buf[:aes.BlockSize], buf[aes.BlockSize:]
 	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
@@ -74,7 +149,7 @@ func (c *config) Encrypt(plaintext string) string {
 	return base64.StdEncoding.EncodeToString(buf)
 }
 
-func (c *config) Decrypt(ciphertext string) string {
+func (c *autoFileConfig) Decrypt(ciphertext string) string {
 	buf, err := base64.StdEncoding.DecodeString(ciphertext)
 	if err != nil || len(buf) < aes.BlockSize {
 		return ""
@@ -84,37 +159,39 @@ func (c *config) Decrypt(ciphertext string) string {
 	return string(rest)
 }
 
-func (c *config) load() {
-	data, err := ioutil.ReadFile(configFileName())
+func (c *autoFileConfig) Load() error {
+	if c.autoFileName == "" {
+		return ErrNoFileName
+	}
+	data, err := ioutil.ReadFile(c.autoFileName)
+	if os.IsPermission(err) {
+		return err
+	}
+	if os.IsNotExist(err) {
+		// make sure we can write the file
+		err = ioutil.WriteFile(c.autoFileName, nil, ConfigFileMode)
+		return err
+	}
 	if err == nil {
 		if err = json.Unmarshal(data, &c.v); err != nil {
-			log.Println(os.Stderr, "config load:", err)
+			// don't fail on corrupt config
+			log.Println(os.Stderr, "Config", c.autoFileName, "corrupt:", err)
 		}
 	}
+	return nil
 }
 
-func (c *config) save() {
+func (c *autoFileConfig) Save() error {
+	if c.autoFileName == "" {
+		return nil
+	}
 	data, err := json.MarshalIndent(c.v, "", "  ")
-	if err != nil {
-		panic(err)
+	if err == nil {
+		data = append(data, '\n')
+		err = ioutil.WriteFile(c.autoFileName, data, ConfigFileMode)
 	}
-	data = append(data, '\n')
-	ioutil.WriteFile(configFileName(), data, 0700)
-}
-
-var Config config
-
-const configName = ".mcbot-config"
-
-func configFileName() string {
-	u, err := user.Current()
 	if err != nil {
-		return configName
+		log.Println(os.Stderr, "Config", c.autoFileName, "can't be saved:", err)
 	}
-	return path.Join(u.HomeDir, configName)
-}
-
-func init() {
-	Config = config{make(map[string]string)}
-	Config.load()
+	return err
 }

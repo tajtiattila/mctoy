@@ -82,9 +82,7 @@ type LoginStart struct {
 
 func (LoginStart) Id() uint { return 0x00 }
 
-type Disconnect struct {
-	// 0x00 ->Client
-}
+type Disconnect string
 
 func (Disconnect) Id() uint { return 0x00 }
 

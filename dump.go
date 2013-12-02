@@ -7,6 +7,8 @@ import (
 	"io"
 )
 
+const PACKETDEBUG = true
+
 type Dumper struct {
 	l      io.Writer
 	b1, b2 bytes.Buffer
@@ -26,8 +28,8 @@ func (d Dumper) line(pfx string, err error) {
 func (d Dumper) bytes(buf []byte) {
 	sfx := ""
 	trunc := 256
-	if len(buf) > trunc {
-		sfx = fmt.Sprint("...", len(buf)-trunc, "more bytes")
+	if len(buf) > 2*trunc {
+		sfx = fmt.Sprint("... ", len(buf)-trunc, " more bytes")
 		buf = buf[:trunc]
 	}
 	lmod := 16
