@@ -11,6 +11,68 @@ var (
 	ErrBufferShort = errors.New("Buffer insufficient for packet")
 )
 
+type PacketScanner struct {
+	rd      io.Reader
+	buf     []byte
+	r, w    int
+	lasterr error
+}
+
+func NewPacketScanner(i io.Reader) *PacketScanner {
+	return &PacketScanner{rd: i, buf: make([]byte, 4)}
+}
+
+func (r *PacketScanner) SetInput(i io.Reader) {
+	r.rd = i
+}
+
+// Scan() returns complete Minecraft packets
+func (p *PacketScanner) Scan() (packet []byte, err error) {
+	if p.w != 0 {
+		copy(p.buf, p.buf[p.w:p.r])
+		p.w, p.r = 0, p.r-p.w
+	}
+	for {
+		var npkt, nread int
+		if p.r != 0 {
+			npkt = packetLen(p.buf[:p.r])
+			if npkt != 0 && npkt < p.r {
+				p.w = npkt
+				return p.ret()
+			}
+			if p.lasterr != nil {
+				// we don't have a full packet yet, so return the error, if any
+				err, p.lasterr = p.lasterr, nil
+				return
+			}
+		}
+		if p.r == len(p.buf) {
+			nlen := len(p.buf)*3/2 + 1
+			if npkt > nlen {
+				nlen = npkt*3/2 + 1
+			}
+			nbuf := make([]byte, nlen)
+			copy(nbuf, p.buf)
+			p.buf = nbuf
+		}
+		nread, p.lasterr = p.rd.Read(p.buf[p.r:])
+		p.r += nread
+	}
+}
+
+func (p *PacketScanner) ret() (packet []byte, err error) {
+	packet, err, p.lasterr = p.buf[:p.w], p.lasterr, nil
+	return
+}
+
+func packetLen(packet []byte) int {
+	lenpkt, lenvarint := binary.Uvarint(packet)
+	if lenvarint == 0 {
+		return 0
+	}
+	return lenvarint + int(lenpkt)
+}
+
 type PacketReader struct {
 	r       *bufio.Reader
 	scratch []byte
