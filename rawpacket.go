@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+	"os"
 )
 
 var (
@@ -14,63 +15,80 @@ var (
 type PacketScanner struct {
 	rd      io.Reader
 	buf     []byte
-	r, w    int
+	r, w, o int
 	lasterr error
 }
 
+const DefaultPacketBufferSize = 4096
+
 func NewPacketScanner(i io.Reader) *PacketScanner {
+	return NewPacketScannerSize(i, DefaultPacketBufferSize)
 	return &PacketScanner{rd: i, buf: make([]byte, 4)}
 }
 
-func (r *PacketScanner) SetInput(i io.Reader) {
-	r.rd = i
+func NewPacketScannerSize(i io.Reader, bufsiz int) *PacketScanner {
+	return &PacketScanner{rd: i, buf: make([]byte, bufsiz)}
+}
+
+func (s *PacketScanner) SetInput(i io.Reader) {
+	s.rd = i
+}
+
+func (s *PacketScanner) Bytes() []byte {
+	return s.buf[s.o:s.w]
+}
+
+func (s *PacketScanner) Error() error {
+	return s.lasterr
 }
 
 // Scan() returns complete Minecraft packets
-func (p *PacketScanner) Scan() (packet []byte, err error) {
-	if p.w != 0 {
-		copy(p.buf, p.buf[p.w:p.r])
-		p.w, p.r = 0, p.r-p.w
+func (s *PacketScanner) Scan() bool {
+	s.lasterr = nil
+	if s.w != 0 {
+		copy(s.buf, s.buf[s.w:s.r])
+		s.w, s.r = 0, s.r-s.w
 	}
 	for {
-		var npkt, nread int
-		if p.r != 0 {
-			npkt = packetLen(p.buf[:p.r])
-			if npkt != 0 && npkt < p.r {
-				p.w = npkt
-				return p.ret()
+		var epkt, nread int
+		if s.r != 0 {
+			npkt0, nl := binary.Uvarint(s.buf[:s.r])
+			epkt = nl + int(npkt0)
+			if nl != 0 && epkt <= s.r {
+				s.o, s.w = nl, epkt
+				if PACKETDEBUG {
+					d := MakeDumper(os.Stdout)
+					d.line("pktscan:", nil)
+					d.bytes(s.Bytes())
+				}
+				return true
 			}
-			if p.lasterr != nil {
-				// we don't have a full packet yet, so return the error, if any
-				err, p.lasterr = p.lasterr, nil
-				return
+			if s.lasterr != nil {
+				// we don't have a full packet yet, but got an error
+				s.o = s.w
+				return false
 			}
 		}
-		if p.r == len(p.buf) {
-			nlen := len(p.buf)*3/2 + 1
-			if npkt > nlen {
-				nlen = npkt*3/2 + 1
+		if s.r == len(s.buf) {
+			nlen := len(s.buf)*3/2 + 1
+			if epkt > nlen {
+				nlen = epkt*3/2 + 1
 			}
 			nbuf := make([]byte, nlen)
-			copy(nbuf, p.buf)
-			p.buf = nbuf
+			copy(nbuf, s.buf)
+			s.buf = nbuf
 		}
-		nread, p.lasterr = p.rd.Read(p.buf[p.r:])
-		p.r += nread
+		nread, s.lasterr = s.rd.Read(s.buf[s.r:])
+		s.r += nread
 	}
 }
 
-func (p *PacketScanner) ret() (packet []byte, err error) {
-	packet, err, p.lasterr = p.buf[:p.w], p.lasterr, nil
-	return
-}
-
-func packetLen(packet []byte) int {
-	lenpkt, lenvarint := binary.Uvarint(packet)
-	if lenvarint == 0 {
-		return 0
+func (s *PacketScanner) PacketId() (uint, bool) {
+	i, ni := binary.Uvarint(s.Bytes()) // packet length
+	if ni != 0 {
+		return uint(i), true
 	}
-	return lenvarint + int(lenpkt)
+	return 0, false
 }
 
 type PacketReader struct {

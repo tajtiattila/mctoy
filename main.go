@@ -42,8 +42,12 @@ func main() {
 	fmt.Println("Connecting", cfg.Value("server"))
 
 	c, err := Connect(cfg)
-	fmt.Println(err)
+	if err != nil {
+		panic(err)
+	}
 
 	err = c.Login()
-	fmt.Println(err)
+	if err != nil {
+		panic(err)
+	}
 }

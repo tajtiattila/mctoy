@@ -25,9 +25,8 @@ type Conn struct {
 	host    string
 	port    int
 	c       net.Conn
-	r       *PacketReader
+	r       *PacketScanner
 	w       *PacketWriter
-	rbuf    []byte
 	wbuf    []byte
 	rbufsiz int
 }
@@ -39,6 +38,7 @@ const (
 var (
 	ErrPacketMismatch    = errors.New("Packet id mismatch")
 	ErrServerAddrInvalid = errors.New("Server address invalid")
+	ErrNoResponse        = errors.New("No response from server")
 	ErrLoginMissing      = errors.New("Username or password missing")
 	ErrLoginFailed       = errors.New("Login failed")
 )
@@ -85,9 +85,8 @@ func dial(cfg Config, host string, port int) (*Conn, error) {
 		host,
 		port,
 		nc,
-		NewPacketReader(sr),
+		NewPacketScanner(sr),
 		NewPacketWriter(sw),
-		make([]byte, bufLen),
 		make([]byte, bufLen),
 		0,
 	}
@@ -255,11 +254,6 @@ func (c *Conn) Login() error {
 	h.Write(erq.PublicKey)
 	sidSum := McDigest(h.Sum(nil))
 
-	fmt.Printf("serverId: %x\n", erq.ServerId)
-	fmt.Printf("sharedSecret: %x\n", sharedSecret)
-	fmt.Printf("publicKey: %x\n", erq.PublicKey)
-	fmt.Printf("serverIdSum: %s\n", sidSum)
-
 	rsacipher, err := NewRSA_PKCS1v15(erq.PublicKey)
 	if err != nil {
 		return err
@@ -283,18 +277,7 @@ func (c *Conn) Login() error {
 	if _, err = buf.ReadFrom(resp.Body); err != nil {
 		return err
 	}
-	fmt.Printf("sessionserver ok\n")
-	/*
-		rsa_cipher = PKCS1_v1_5.new(RSA.importKey(pubkey))
-		self.net.push(mcpacket.Packet(
-			ident = (mcdata.LOGIN_STATE, mcdata.CLIENT_TO_SERVER, 0x01),
-			data = {
-				'shared_secret': rsa_cipher.encrypt(self.auth.shared_secret),
-				'verify_token': rsa_cipher.encrypt(packet.data['verify_token']),
-			}
-		))
-		self.net.enable_crypto(self.auth.shared_secret)
-	*/
+
 	c.Send(EncryptionResponse{
 		SharedSecret: rsacipher.Encrypt(sharedSecret),
 		VerifyToken:  rsacipher.Encrypt(erq.VerifyToken),
@@ -305,15 +288,16 @@ func (c *Conn) Login() error {
 
 	c.EnableCrypto(sharedSecret)
 
-	pkid, err := c.PeekId()
-	if err != nil {
-		return err
+	c.Scan()
+	pkid, ok := c.PeekId()
+	if !ok {
+		return ErrNoResponse
 	}
 
 	switch pkid {
 	case 0x00:
 		var d Disconnect
-		if err = c.Recv(&d); err != nil {
+		if err = c.Peek(&d); err != nil {
 			return err
 		}
 		fmt.Println("Disconnect:", string(d))
@@ -323,7 +307,7 @@ func (c *Conn) Login() error {
 		return ErrLoginFailed
 	case 0x02:
 		var ls LoginSuccess
-		if err = c.Recv(&ls); err != nil {
+		if err = c.Peek(&ls); err != nil {
 			return err
 		}
 	}
@@ -342,16 +326,16 @@ func (c *Conn) EnableCrypto(secret []byte) {
 	)
 	sr = cipher.StreamReader{
 		R: c.c,
-		S: newCFB8Decrypt(aesc, secret),
+		S: NewCFBXDecrypter(aesc, secret),
 	}
 	sw = cipher.StreamWriter{
 		W: c.c,
-		S: newCFB8Encrypt(aesc, secret),
+		S: NewCFBXEncrypter(aesc, secret),
 	}
 	if PACKETDEBUG {
 		sr, sw = NewDebugReader(sr, os.Stdout), NewDebugWriter(sw, os.Stdout)
 	}
-	c.r, c.w = NewPacketReader(sr), NewPacketWriter(sw)
+	c.r, c.w = NewPacketScanner(sr), NewPacketWriter(sw)
 }
 
 type RSA_PKCS1v15 struct {
@@ -378,7 +362,7 @@ func (c *RSA_PKCS1v15) Error() error {
 }
 
 func (c *Conn) Send(p Packet) error {
-	pkc := MakePacketEncoder(c.rbuf)
+	pkc := MakePacketEncoder(c.wbuf)
 	pkc.PutUvarint(p.Id())
 	pkc.Encode(p)
 	if pkc.Error() != nil {
@@ -388,33 +372,16 @@ func (c *Conn) Send(p Packet) error {
 	return err
 }
 
-func (c *Conn) fill() (err error) {
-	if c.rbufsiz == 0 {
-		c.rbufsiz, err = c.r.Read(c.rbuf)
-		if err != nil {
-			c.rbufsiz = 0
-			return err
-		}
-	}
-	return
+func (c *Conn) Scan() bool {
+	return c.r.Scan()
 }
 
-func (c *Conn) PeekId() (uint, error) {
-	err := c.fill()
-	if err == nil {
-		return ^uint(0), err
-	}
-	pkc := MakePacketDecoder(c.rbuf[:c.rbufsiz])
-	id := pkc.Uvarint()
-	if err == nil {
-		err = pkc.Error()
-	}
-	return id, err
+func (c *Conn) PeekId() (uint, bool) {
+	return c.r.PacketId()
 }
 
 func (c *Conn) Peek(p Packet) (err error) {
-	err = c.fill()
-	pkc := MakePacketDecoder(c.rbuf[:c.rbufsiz])
+	pkc := MakePacketDecoder(c.r.Bytes())
 	id := pkc.Uvarint()
 	if p.Id() != id {
 		return ErrPacketMismatch
@@ -426,12 +393,8 @@ func (c *Conn) Peek(p Packet) (err error) {
 	return
 }
 
-func (c *Conn) Pop() {
-	c.rbufsiz = 0
-}
-
 func (c *Conn) Recv(p Packet) (err error) {
+	c.r.Scan()
 	err = c.Peek(p)
-	c.Pop()
 	return
 }

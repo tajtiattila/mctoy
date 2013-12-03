@@ -7,7 +7,7 @@ import (
 	"io"
 )
 
-const PACKETDEBUG = true
+const PACKETDEBUG = false
 
 type Dumper struct {
 	l      io.Writer

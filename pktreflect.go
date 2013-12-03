@@ -10,8 +10,9 @@ import (
 )
 
 var (
-	ErrBufferOverflow = errors.New("Buffer overflow")
-	ErrUnknownArray   = errors.New("Unknown array")
+	ErrBufferOverflow  = errors.New("Buffer overflow")
+	ErrBufferUnderflow = errors.New("Buffer underflo")
+	ErrUnknownArray    = errors.New("Unknown array")
 
 	endian = binary.BigEndian
 )
@@ -86,6 +87,7 @@ func (d *PacketDecoder) get(size int) []byte {
 	}
 	d.pos = len(d.data)
 	d.err = ErrBufferOverflow
+	panic(nil)
 	return nil
 }
 func (d *PacketDecoder) Int64() int64 {
@@ -144,7 +146,6 @@ func (d *PacketDecoder) Uvarint() uint {
 }
 func (d *PacketDecoder) String() string {
 	b := d.get(int(d.Uvarint()))
-	println(len(b))
 	return string(b)
 }
 
@@ -239,7 +240,7 @@ func (e *PacketEncoder) get(size int) []byte {
 		return e.data[p : p+size]
 	}
 	e.pos = len(e.data)
-	e.err = ErrBufferOverflow
+	e.err = ErrBufferUnderflow
 	return nil
 }
 func (e *PacketEncoder) PutInt64(i int64) {
@@ -279,7 +280,7 @@ func (e *PacketEncoder) PutVarint(i int) {
 		return
 	}
 	e.pos = len(e.data)
-	e.err = ErrBufferOverflow
+	e.err = ErrBufferUnderflow
 }
 func (e *PacketEncoder) PutUvarint(i uint) {
 	if e.pos+binary.MaxVarintLen64 <= len(e.data) {
@@ -288,7 +289,7 @@ func (e *PacketEncoder) PutUvarint(i uint) {
 		return
 	}
 	e.pos = len(e.data)
-	e.err = ErrBufferOverflow
+	e.err = ErrBufferUnderflow
 }
 func (e *PacketEncoder) PutString(s string) {
 	e.PutUvarint(uint(len(s)))
