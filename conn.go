@@ -1,19 +1,13 @@
 package main
 
 import (
-	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/sha1"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -174,6 +168,33 @@ func (c *Conn) Ping() (t time.Duration, err error) {
 	return
 }
 
+type StdinPasswdReq struct {
+	u, p string
+}
+
+func (q *StdinPasswdReq) AskLogin(savedUsername string) (username, password string, err error) {
+	if q.u != "" && q.p != "" {
+		return q.u, q.p, nil
+	}
+	fmt.Print("Username: ")
+	if _, err = fmt.Scan(&q.u); err != nil {
+		return "", "", err
+	}
+	fmt.Print("Password: ")
+	if _, err = fmt.Scan(&q.p); err != nil {
+		return "", "", err
+	}
+	return q.u, q.p, nil
+}
+
+type CfgPasswdReq struct {
+	cfg Config
+}
+
+func (q *CfgPasswdReq) AskLogin(savedUsername string) (username, password string, err error) {
+	return q.cfg.Value("username"), q.cfg.Secret("password"), nil
+}
+
 func (c *Conn) Login() error {
 	/*
 		C->S : Handshake State=2
@@ -187,44 +208,6 @@ func (c *Conn) Login() error {
 
 	var err error
 
-	clientToken, accessToken := c.cfg.Value("clientToken"), c.cfg.Value("accessToken")
-
-	var ygg YggAuth
-	profile := LoadYggProfile(c.cfg)
-	if accessToken == "" || ygg.Validate(accessToken) != nil {
-		tryRefresh := true
-		if clientToken == "" {
-			clientToken, err = GenerateV4UUID()
-			if err != nil {
-				return err
-			}
-			c.cfg.SetValue("clientToken", clientToken)
-			tryRefresh = false
-		}
-		var yr *YggResponse
-		if tryRefresh {
-			yr, err = ygg.Refresh(clientToken, accessToken)
-			if err == nil {
-				fmt.Println("Access token refreshed.")
-			}
-		}
-		if yr == nil {
-			user, passwd := c.cfg.Value("username"), c.cfg.Secret("password")
-			yr, err = ygg.Authenticate(user, passwd, clientToken)
-			if err != nil {
-				return err
-			}
-			fmt.Println("Authenticated.")
-		}
-		clientToken, accessToken = yr.ClientToken, yr.AccessToken
-		c.cfg.SetValue("clientToken", clientToken)
-		c.cfg.SetValue("accessToken", accessToken)
-		profile = yr.SelectedProfile
-		SaveYggProfile(c.cfg, profile)
-	} else {
-		fmt.Println("Access token still valid.")
-	}
-
 	err = c.Send(Handshake{
 		ProtocolVersion: 4, // 1.7.2
 		ServerAddress:   c.host,
@@ -232,7 +215,18 @@ func (c *Conn) Login() error {
 		NextState:       StateLogin,
 	})
 
-	err = c.Send(LoginStart{profile.Name})
+	ygg := NewYggAuth(NewConfigStore("auth", c.cfg), &CfgPasswdReq{c.cfg})
+	if err = ygg.Start(); err != nil {
+		return err
+	}
+
+	n := ygg.ProfileName()
+	if n == "" {
+		fmt.Println("hopp")
+		return errors.New("no profilname")
+	}
+
+	err = c.Send(LoginStart{ygg.ProfileName()})
 	if err != nil {
 		return err
 	}
@@ -241,52 +235,18 @@ func (c *Conn) Login() error {
 	if err = c.Recv(&erq); err != nil {
 		return err
 	}
-	dumpJson(erq)
 
-	sharedSecret, err := GenerateSharedSecret()
+	session, err := ygg.JoinSession(erq.ServerId, erq.PublicKey)
 	if err != nil {
-		return err
-	}
-
-	h := sha1.New()
-	io.WriteString(h, erq.ServerId)
-	h.Write(sharedSecret)
-	h.Write(erq.PublicKey)
-	sidSum := McDigest(h.Sum(nil))
-
-	rsacipher, err := NewRSA_PKCS1v15(erq.PublicKey)
-	if err != nil {
-		return err
-	}
-
-	url := "https://sessionserver.mojang.com/session/minecraft/join"
-	jd, err := json.Marshal(map[string]interface{}{
-		"accessToken":     accessToken,
-		"selectedProfile": profile,
-		"serverId":        sidSum,
-	})
-	if err != nil {
-		return err
-	}
-	resp, err := http.Post(url, "application/json", bytes.NewReader(jd))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	var buf bytes.Buffer
-	if _, err = buf.ReadFrom(resp.Body); err != nil {
 		return err
 	}
 
 	c.Send(EncryptionResponse{
-		SharedSecret: rsacipher.Encrypt(sharedSecret),
-		VerifyToken:  rsacipher.Encrypt(erq.VerifyToken),
+		SharedSecret: session.Cipher.Encrypt(session.SharedSecret),
+		VerifyToken:  session.Cipher.Encrypt(erq.VerifyToken),
 	})
-	if rsacipher.Error() != nil {
-		return rsacipher.Error()
-	}
 
-	c.EnableCrypto(sharedSecret)
+	c.EnableCrypto(session.SharedSecret)
 
 	c.Scan()
 	pkid, ok := c.PeekId()
@@ -337,29 +297,6 @@ func (c *Conn) EnableCrypto(secret []byte) {
 		sr, sw = NewDebugReader(sr, os.Stdout), NewDebugWriter(sw, os.Stdout)
 	}
 	c.r, c.w = NewPacketScanner(sr), NewPacketWriter(sw)
-}
-
-type RSA_PKCS1v15 struct {
-	pubkey *rsa.PublicKey
-	err    error
-}
-
-func NewRSA_PKCS1v15(pubkey []byte) (*RSA_PKCS1v15, error) {
-	k0, err := x509.ParsePKIXPublicKey(pubkey)
-	if err != nil {
-		return nil, err
-	}
-	return &RSA_PKCS1v15{pubkey: k0.(*rsa.PublicKey)}, nil
-}
-func (c *RSA_PKCS1v15) Encrypt(b []byte) []byte {
-	o, err := rsa.EncryptPKCS1v15(rand.Reader, c.pubkey, b)
-	if err != nil {
-		c.err = err
-	}
-	return o
-}
-func (c *RSA_PKCS1v15) Error() error {
-	return c.err
 }
 
 func (c *Conn) Send(p Packet) error {
