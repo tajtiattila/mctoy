@@ -102,8 +102,7 @@ func (y *YggAuth) Start() error {
 	}
 
 	// and try to authenticate
-	err = y.Authenticate(user, passwd)
-	if err != nil {
+	if err = y.Authenticate(user, passwd); err != nil {
 		return err
 	}
 	log.Println("Authenticated.")
@@ -147,7 +146,6 @@ func (y *YggAuth) Refresh() error {
 	// (The used access token is invalidated)
 	// Returns response error on failure
 	if y.info.ClientToken == "" {
-		log.Println("Client token necessary for refresh")
 		return YggError("Client token necessary for refresh")
 	}
 	resp, err := y.request("/refresh", yggPayload{

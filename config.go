@@ -26,12 +26,20 @@ type ConfigStore struct {
 	Config Config
 }
 
+type ErrConfigValueMissing string
+
+func (e ErrConfigValueMissing) Error() string { return "Config value missing: " + string(e) }
+
 func NewConfigStore(n string, c Config) *ConfigStore {
 	return &ConfigStore{n, c}
 }
 
 func (s *ConfigStore) Load(v interface{}) error {
-	edata := []byte(s.Config.Value(s.Name))
+	sval := s.Config.Value(s.Name)
+	if sval == "" {
+		return ErrConfigValueMissing(s.Name)
+	}
+	edata := []byte(sval)
 	e := base64.StdEncoding
 	data := make([]byte, e.DecodedLen(len(edata)))
 	n, err := e.Decode(data, edata)

@@ -220,12 +220,6 @@ func (c *Conn) Login() error {
 		return err
 	}
 
-	n := ygg.ProfileName()
-	if n == "" {
-		fmt.Println("hopp")
-		return errors.New("no profilname")
-	}
-
 	err = c.Send(LoginStart{ygg.ProfileName()})
 	if err != nil {
 		return err
