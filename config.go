@@ -3,7 +3,7 @@ package main
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/rand"
+	crand "crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -15,6 +15,44 @@ import (
 	"os/user"
 	path "path/filepath"
 )
+
+type PersistentStore interface {
+	Save(interface{}) error
+	Load(interface{}) error
+}
+
+type ConfigStore struct {
+	Name   string
+	Config Config
+}
+
+func NewConfigStore(n string, c Config) *ConfigStore {
+	return &ConfigStore{n, c}
+}
+
+func (s *ConfigStore) Load(v interface{}) error {
+	edata := []byte(s.Config.Value(s.Name))
+	e := base64.StdEncoding
+	data := make([]byte, e.DecodedLen(len(edata)))
+	n, err := e.Decode(data, edata)
+	if err != nil {
+		return err
+	}
+	data = data[:n]
+	return json.Unmarshal(data, v)
+}
+
+func (s *ConfigStore) Save(v interface{}) error {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	e := base64.StdEncoding
+	edata := make([]byte, e.EncodedLen(len(data)))
+	e.Encode(edata, data)
+	s.Config.SetValue(s.Name, string(edata))
+	return nil
+}
 
 type Config interface {
 	Value(name string) string
@@ -135,7 +173,7 @@ func (c *autoFileConfig) getCipherBlock() cipher.Block {
 		}
 	}
 	k := make([]byte, cipherLen)
-	io.ReadFull(rand.Reader, k)
+	io.ReadFull(crand.Reader, k)
 	c.v[cipherKey] = hex.EncodeToString(k)
 	c.Save()
 	return makeCipherBlock(k)
@@ -144,7 +182,7 @@ func (c *autoFileConfig) getCipherBlock() cipher.Block {
 func (c *autoFileConfig) Encrypt(plaintext string) string {
 	buf := make([]byte, aes.BlockSize+len(plaintext))
 	iv, rest := buf[:aes.BlockSize], buf[aes.BlockSize:]
-	if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+	if _, err := io.ReadFull(crand.Reader, iv); err != nil {
 		panic(err)
 	}
 	copy(rest, plaintext)
