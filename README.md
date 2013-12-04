@@ -28,9 +28,9 @@ Thanks
 
 Special thanks to:
 
-Nick Gamberini [Spock]
-Carlos Cobo for [Minero]
-Matthew Collins for [Netherrack]
+* Nick Gamberini for [Spock]
+* Carlos Cobo for [Minero]
+* Matthew Collins for [Netherrack]
 
 [Protocol]: http://wiki.vg/Protocol
 [Minecraft]: http://minecraft.net
