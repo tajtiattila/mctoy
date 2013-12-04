@@ -63,11 +63,11 @@ func (s *PacketScanner) Scan() bool {
 				}
 				return true
 			}
-			if s.lasterr != nil {
-				// we don't have a full packet yet, but got an error
-				s.o = s.w
-				return false
-			}
+		}
+		if s.lasterr != nil {
+			// we don't have a full packet yet, but got an error
+			s.o = s.w
+			return false
 		}
 		if s.r == len(s.buf) {
 			nlen := len(s.buf)*3/2 + 1
