@@ -20,58 +20,62 @@ import (
 	"crypto/cipher"
 )
 
-/*
-	Allow for AES streams
-*/
-type cfb8 struct {
-	c                cipher.Block
-	blockSize        int
-	iv, iv_real, tmp []byte
-	de               bool
+func NewCFB8Decrypter(c cipher.Block, iv []byte) cipher.Stream {
+	return newCFB8(c, iv, true)
 }
 
+func NewCFB8Encrypter(c cipher.Block, iv []byte) cipher.Stream {
+	return newCFB8(c, iv, false)
+}
+
+type cfb8 struct {
+	c            cipher.Block
+	blockSize    int
+	buf, iv, out []byte
+	de           bool
+}
+
+const CircularBufferLen = 256
+
 func newCFB8(c cipher.Block, iv []byte, decrypt bool) *cfb8 {
-	if len(iv) != 16 {
-		panic("bad iv length!")
+	if len(iv) != c.BlockSize() {
+		panic("newCFB8: IV length must equal block size")
 	}
-	cp := make([]byte, 256)
-	copy(cp, iv)
+	bsiz, n := c.BlockSize(), CircularBufferLen
+	if n < bsiz*4 {
+		n = bsiz * 4
+	}
+	buf := make([]byte, n+bsiz)
+	copy(buf, iv)
 	return &cfb8{
 		c:         c,
 		blockSize: c.BlockSize(),
-		iv:        cp[:16],
-		iv_real:   cp,
-		tmp:       make([]byte, 16),
+		buf:       buf,
+		iv:        buf[:bsiz],
+		out:       make([]byte, bsiz),
 		de:        decrypt,
 	}
 }
 
-func newCFB8Decrypt(c cipher.Block, iv []byte) *cfb8 {
-	return newCFB8(c, iv, true)
-}
-
-func newCFB8Encrypt(c cipher.Block, iv []byte) *cfb8 {
-	return newCFB8(c, iv, false)
-}
-
-func (cf *cfb8) XORKeyStream(dst, src []byte) {
+func (x *cfb8) XORKeyStream(dst, src []byte) {
+	bsiz := x.c.BlockSize()
 	for i := 0; i < len(src); i++ {
-		val := src[i]
-		cf.c.Encrypt(cf.tmp, cf.iv)
-		val = val ^ cf.tmp[0]
+		b := src[i]
+		x.c.Encrypt(x.out, x.iv)
+		b = b ^ x.out[0]
 
-		if cap(cf.iv) >= 17 {
-			cf.iv = cf.iv[1:17]
+		if cap(x.iv) > bsiz {
+			x.iv = x.iv[1 : bsiz+1]
 		} else {
-			copy(cf.iv_real, cf.iv[1:])
-			cf.iv = cf.iv_real[:16]
+			copy(x.buf, x.iv[1:])
+			x.iv = x.buf[:bsiz]
 		}
 
-		if cf.de {
-			cf.iv[15] = src[i]
+		if x.de {
+			x.iv[bsiz-1] = src[i]
 		} else {
-			cf.iv[15] = val
+			x.iv[bsiz-1] = b
 		}
-		dst[i] = val
+		dst[i] = b
 	}
 }

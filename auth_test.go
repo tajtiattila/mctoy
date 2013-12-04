@@ -3,7 +3,9 @@ package main
 import (
 	"crypto/sha1"
 	"io"
+	"math/rand"
 	"testing"
+	"time"
 )
 
 // AuthDigest computes a special SHA-1 digest required for Minecraft web
@@ -30,6 +32,43 @@ func TestMcDigest(t *testing.T) {
 			t.Errorf("AutDigest mismatch for %s:\n%s\n%s\n\n", k, AuthDigest(k), v)
 		} else {
 			t.Logf("AutDigest for %s is OK\n", k)
+		}
+	}
+}
+
+func TestRandReader(t *testing.T) {
+	seed := int64(time.Now().Unix())
+	rn := rand.New(rand.NewSource(seed))
+	r1, r2 := rand.New(rand.NewSource(seed)), rand.New(rand.NewSource(seed))
+	rr1, rr2 := NewRandReader(r1), NewRandReader(r2)
+	nreads := 8
+	v1, v2 := make([]int, nreads), make([]int, nreads)
+	t1, t2 := make([]byte, 4096), make([]byte, 4096)
+	for n := 0; n < 10; n++ {
+		for i := range v1 {
+			v1[i] = int(rn.Int31n(64)) + 1
+		}
+		for i, pi := range rand.Perm(len(v1)) {
+			v2[pi] = v1[i]
+		}
+		for i := range v1 {
+			l1, l2 := v1[i], v2[i]
+			rr1.Read(t1[:l1])
+			rr2.Read(t2[:l2])
+		}
+		cmp := 16
+		rr1.Read(t1[:cmp])
+		rr2.Read(t2[:cmp])
+		eq := true
+		for i := 0; i < cmp; i++ {
+			if t1[i] != t2[i] {
+				eq = false
+			}
+		}
+		if !eq {
+			t.Error("Random reader mismatch based on read buffer lengths")
+		} else {
+			t.Log("reading lengths OK:", v1, v2)
 		}
 	}
 }

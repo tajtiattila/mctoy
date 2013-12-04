@@ -310,6 +310,7 @@ func (c *Conn) Login() error {
 		if err = c.Peek(&ls); err != nil {
 			return err
 		}
+		fmt.Println("Login successful")
 	}
 
 	return nil
@@ -326,11 +327,11 @@ func (c *Conn) EnableCrypto(secret []byte) {
 	)
 	sr = cipher.StreamReader{
 		R: c.c,
-		S: NewCFBXDecrypter(aesc, secret),
+		S: NewCFB8Decrypter(aesc, secret),
 	}
 	sw = cipher.StreamWriter{
 		W: c.c,
-		S: NewCFBXEncrypter(aesc, secret),
+		S: NewCFB8Encrypter(aesc, secret),
 	}
 	if PACKETDEBUG {
 		sr, sw = NewDebugReader(sr, os.Stdout), NewDebugWriter(sw, os.Stdout)

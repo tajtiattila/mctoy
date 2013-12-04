@@ -8,8 +8,11 @@ import (
 )
 
 func TestConfigCrypto(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test in short mode.")
+	}
 	rand.Seed(time.Now().Unix())
-	c := config{make(map[string]string)}
+	c := NewMemoryConfig()
 	for i := 0; i < 10; i++ {
 		b := make([]byte, rand.Int()&0xff)
 		for i := range b {

@@ -25,6 +25,9 @@ type Config interface {
 
 	GetAllKeys() []string
 	Clear()
+
+	Encrypt(string) string
+	Decrypt(string) string
 }
 
 const (
