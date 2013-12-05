@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	server = flag.String("s", "", "Minecraft server address")
+	server = flag.String("addr", "", "Minecraft server address")
 )
 
 func main() {
@@ -26,9 +26,10 @@ func main() {
 		cfg.SetValue("server", "localhost:25565")
 	}
 
-	fmt.Println("Connecting", cfg.Value("server"))
+	addr := cfg.Value("server")
+	fmt.Println("Connecting", addr)
 
-	c, err := Connect(cfg)
+	c, err := Connect(addr, NewConfigStore("auth", cfg))
 	if err != nil {
 		panic(err)
 	}

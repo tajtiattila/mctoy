@@ -1,8 +1,6 @@
 package main
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,7 +13,7 @@ import (
 )
 
 type Conn struct {
-	cfg     Config
+	perstor PersistentStore // used by YggAuth
 	host    string
 	port    int
 	c       net.Conn
@@ -36,9 +34,9 @@ var (
 	ErrLoginFailed       = errors.New("Login failed")
 )
 
-func Connect(cfg Config) (*Conn, error) {
+func Connect(addr string, s PersistentStore) (*Conn, error) {
 
-	v := strings.SplitN(cfg.Value("server"), ":", 2)
+	v := strings.SplitN(addr, ":", 2)
 	host := v[0]
 	if len(host) == 0 {
 		return nil, ErrServerAddrInvalid
@@ -52,10 +50,10 @@ func Connect(cfg Config) (*Conn, error) {
 		}
 	}
 
-	return dial(cfg, host, port)
+	return dial(s, host, port)
 }
 
-func dial(cfg Config, host string, port int) (*Conn, error) {
+func dial(s PersistentStore, host string, port int) (*Conn, error) {
 	nc, err := net.Dial("tcp", fmt.Sprintf("%s:%d", host, port))
 	if err != nil {
 		return nil, err
@@ -69,15 +67,14 @@ func dial(cfg Config, host string, port int) (*Conn, error) {
 		sr, sw = NewDebugReader(sr, os.Stdout), NewDebugWriter(sw, os.Stdout)
 	}
 	c := &Conn{
-		cfg,
-		host,
-		port,
-		nc,
-		NewPacketScanner(sr),
-		NewPacketWriter(sw),
-		make([]byte, bufLen),
-		0,
+		perstor: s,
+		host:    host,
+		port:    port,
+		c:       nc,
+		wbuf:    make([]byte, bufLen),
 	}
+	c.r, c.w = InitPacketIO(c.c, nil)
+
 	return c, nil
 }
 
@@ -182,7 +179,7 @@ func (c *Conn) Login(up UserPassworder) error {
 		NextState:       StateLogin,
 	})
 
-	ygg := NewYggAuth(NewConfigStore("auth", c.cfg))
+	ygg := NewYggAuth(c.perstor)
 	if err = ygg.Start(up); err != nil {
 		return err
 	}
@@ -207,9 +204,11 @@ func (c *Conn) Login(up UserPassworder) error {
 		VerifyToken:  session.Cipher.Encrypt(erq.VerifyToken),
 	})
 
-	c.EnableCrypto(session.SharedSecret)
+	c.r, c.w = InitPacketIO(c.c, session.SharedSecret)
 
-	c.Scan()
+	if err = c.Scan(); err != nil {
+		return err
+	}
 	pkid, ok := c.PeekId()
 	if !ok {
 		return ErrNoResponse
@@ -237,29 +236,6 @@ func (c *Conn) Login(up UserPassworder) error {
 	return nil
 }
 
-func (c *Conn) EnableCrypto(secret []byte) {
-	aesc, err := aes.NewCipher(secret)
-	if err != nil {
-		panic(err)
-	}
-	var (
-		sr io.Reader
-		sw io.Writer
-	)
-	sr = cipher.StreamReader{
-		R: c.c,
-		S: NewCFB8Decrypter(aesc, secret),
-	}
-	sw = cipher.StreamWriter{
-		W: c.c,
-		S: NewCFB8Encrypter(aesc, secret),
-	}
-	if PACKETDEBUG {
-		sr, sw = NewDebugReader(sr, os.Stdout), NewDebugWriter(sw, os.Stdout)
-	}
-	c.r, c.w = NewPacketScanner(sr), NewPacketWriter(sw)
-}
-
 func (c *Conn) Send(p Packet) error {
 	pkc := MakePacketEncoder(c.wbuf)
 	pkc.PutUvarint(p.Id())
@@ -271,7 +247,7 @@ func (c *Conn) Send(p Packet) error {
 	return err
 }
 
-func (c *Conn) Scan() bool {
+func (c *Conn) Scan() error {
 	return c.r.Scan()
 }
 
@@ -293,7 +269,9 @@ func (c *Conn) Peek(p Packet) (err error) {
 }
 
 func (c *Conn) Recv(p Packet) (err error) {
-	c.r.Scan()
-	err = c.Peek(p)
+	err = c.r.Scan()
+	if err == nil {
+		err = c.Peek(p)
+	}
 	return
 }

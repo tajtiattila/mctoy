@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"crypto/aes"
+	"crypto/cipher"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -11,6 +13,32 @@ import (
 var (
 	ErrBufferShort = errors.New("Buffer insufficient for packet")
 )
+
+func InitPacketIO(h io.ReadWriter, secret []byte) (*PacketScanner, *PacketWriter) {
+	if secret == nil {
+		return NewPacketScanner(h), NewPacketWriter(h)
+	}
+	aesc, err := aes.NewCipher(secret)
+	if err != nil {
+		panic(err)
+	}
+	var (
+		sr io.Reader
+		sw io.Writer
+	)
+	sr = cipher.StreamReader{
+		R: h,
+		S: NewCFB8Decrypter(aesc, secret),
+	}
+	sw = cipher.StreamWriter{
+		W: h,
+		S: NewCFB8Encrypter(aesc, secret),
+	}
+	if PACKETDEBUG {
+		sr, sw = NewDebugReader(sr, os.Stdout), NewDebugWriter(sw, os.Stdout)
+	}
+	return NewPacketScanner(sr), NewPacketWriter(sw)
+}
 
 type PacketScanner struct {
 	rd      io.Reader
@@ -23,28 +51,18 @@ const DefaultPacketBufferSize = 4096
 
 func NewPacketScanner(i io.Reader) *PacketScanner {
 	return NewPacketScannerSize(i, DefaultPacketBufferSize)
-	return &PacketScanner{rd: i, buf: make([]byte, 4)}
 }
 
 func NewPacketScannerSize(i io.Reader, bufsiz int) *PacketScanner {
 	return &PacketScanner{rd: i, buf: make([]byte, bufsiz)}
 }
 
-func (s *PacketScanner) SetInput(i io.Reader) {
-	s.rd = i
-}
-
 func (s *PacketScanner) Bytes() []byte {
 	return s.buf[s.o:s.w]
 }
 
-func (s *PacketScanner) Error() error {
-	return s.lasterr
-}
-
 // Scan() returns complete Minecraft packets
-func (s *PacketScanner) Scan() bool {
-	s.lasterr = nil
+func (s *PacketScanner) Scan() error {
 	if s.w != 0 {
 		copy(s.buf, s.buf[s.w:s.r])
 		s.w, s.r = 0, s.r-s.w
@@ -61,13 +79,13 @@ func (s *PacketScanner) Scan() bool {
 					d.line("pktscan:", nil)
 					d.bytes(s.Bytes())
 				}
-				return true
+				return nil
 			}
 		}
 		if s.lasterr != nil {
 			// we don't have a full packet yet, but got an error
 			s.o = s.w
-			return false
+			return s.lasterr
 		}
 		if s.r == len(s.buf) {
 			nlen := len(s.buf)*3/2 + 1
@@ -89,44 +107,6 @@ func (s *PacketScanner) PacketId() (uint, bool) {
 		return uint(i), true
 	}
 	return 0, false
-}
-
-type PacketReader struct {
-	r       *bufio.Reader
-	scratch []byte
-	spos    int
-}
-
-func NewPacketReader(r io.Reader) *PacketReader {
-	return &PacketReader{bufio.NewReader(r), make([]byte, binary.MaxVarintLen64), 0}
-}
-
-func (pr *PacketReader) Read(packet []byte) (int, error) {
-	if len(packet) < binary.MaxVarintLen64 {
-		return 0, ErrBufferShort
-	}
-	var lenp, nskip int
-	for {
-		var lenp0 uint64
-		lenp0, nskip = binary.Uvarint(pr.scratch[:pr.spos])
-		if nskip != 0 {
-			lenp = int(lenp0)
-			break
-		}
-		n, err := pr.r.Read(pr.scratch[pr.spos:binary.MaxVarintLen64])
-		if err != nil {
-			return 0, err
-		}
-		pr.spos += n
-	}
-	if len(packet) < lenp {
-		return 0, ErrBufferShort
-	}
-	copy(packet, pr.scratch[nskip:pr.spos])
-	pos := pr.spos - nskip
-	_, err := io.ReadFull(pr.r, packet[pos:lenp])
-	pr.spos = 0
-	return lenp, err
 }
 
 type PacketWriter struct {
