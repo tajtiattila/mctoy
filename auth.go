@@ -19,14 +19,27 @@ import (
 	"strings"
 )
 
-/*
-func LoadAuthProfile(c Config) *AuthProfile {
-	return &AuthProfile{c.Value("profileId"), c.Value("profileName")}
+// UserPassworder can return a username and password
+// if requested, possibly prompting the user
+type UserPassworder interface {
+	UserPassword() (user, password string, err error)
 }
-func SaveAuteProfile(c Config, p *AuthProfile) {
-	c.SetValue("profileId",   p.Id)
-	c.SetValue("profileName", p.Name)
-}*/
+
+type UserPassworderFunc func() (user, password string, err error)
+
+func (u UserPassworderFunc) UserPassword() (user, password string, err error) {
+	return u()
+}
+
+/*
+// UserPassworderFunc converts a user passworder compatible function
+// to an actual UserPassworder
+func UserPassworderFunc(f func() (user, password string, err error)) UserPassworder {
+	return &userPassworderFunc{f}
+}
+*/
+
+////////////////////////////////////////////////////////////////////////////////
 
 type AuthProfile struct {
 	Id   string `json:"id"`
@@ -45,10 +58,6 @@ type AuthResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
-type CredentialRequest interface {
-	AskLogin(savedUsername string) (username, password string, err error)
-}
-
 type YggError string
 
 func (y YggError) Error() string { return "Yggdrasil: " + string(y) }
@@ -57,14 +66,19 @@ type yggPayload map[string]interface{}
 
 ////////////////////////////////////////////////////////////////////////////////
 
+// YggAuth is a helper class to log in to a Minecraft server by performing
+// the necessary API requests to authserver.mojang.com and
+// sessionserver.mojand.com. Token and Profile storage is handled by the
+// PersistentStore provided by the user. User credentials are never stored
+// on disk, only client and access tokens that can be refreshed.
 type YggAuth struct {
 	store PersistentStore
-	pwreq CredentialRequest
 	info  AuthInfo
 }
 
-func NewYggAuth(s PersistentStore, crq CredentialRequest) *YggAuth {
-	y := &YggAuth{store: s, pwreq: crq}
+// create
+func NewYggAuth(s PersistentStore) *YggAuth {
+	y := &YggAuth{store: s}
 	err := y.store.Load(&y.info)
 	if err != nil {
 		log.Println(err)
@@ -79,24 +93,21 @@ func (y *YggAuth) ProfileName() string {
 	return ""
 }
 
-func (y *YggAuth) Start() error {
+// The Start utility function tries to Validate or
+// refresh the given token. It uses the provided UserPassworder
+// if there are no cached tokens or they cannot be refreshed.
+func (y *YggAuth) Start(up UserPassworder) error {
 	// try validate first
 	if y.Validate() == nil {
-		log.Println("Access token still valid.")
 		return nil
 	}
 	// then try refresh
 	if y.Refresh() == nil {
 		log.Println("Access token refreshed.")
-		y.store.Save(&y.info)
 		return nil
 	}
 	// else ask the user for her credentials
-	var oldname string
-	if y.info.SelectedProfile != nil {
-		oldname = y.info.SelectedProfile.Name
-	}
-	user, passwd, err := y.pwreq.AskLogin(oldname)
+	user, passwd, err := up.UserPassword()
 	if err != nil {
 		return err
 	}
@@ -106,10 +117,12 @@ func (y *YggAuth) Start() error {
 		return err
 	}
 	log.Println("Authenticated.")
-	y.store.Save(&y.info)
 	return nil
 }
 
+// Authenticate with the given username and password.
+// Successful authentication stores the received tokens in PersistentStore
+// for later Refresh or Validate operation
 func (y *YggAuth) Authenticate(username, password string) error {
 	// Generate an access token using a username and password
 	// (Any existing client token is invalidated if not provided)
@@ -137,14 +150,13 @@ func (y *YggAuth) Authenticate(username, password string) error {
 		return err
 	}
 	y.info = resp.AuthInfo
-	dumpJson(y.info)
+	y.store.Save(&y.info)
 	return nil
 }
 
+// Refresh generates an access token with a client/access token pair
+// (The used access token is invalidated)
 func (y *YggAuth) Refresh() error {
-	// Generate an access token with a client/access token pair
-	// (The used access token is invalidated)
-	// Returns response error on failure
 	if y.info.ClientToken == "" {
 		return YggError("Client token necessary for refresh")
 	}
@@ -155,17 +167,16 @@ func (y *YggAuth) Refresh() error {
 	if err != nil {
 		return err
 	}
-	dumpJson(resp)
 	if err = yggError(resp); err != nil {
 		return err
 	}
 	y.info = resp.AuthInfo
+	y.store.Save(&y.info)
 	return nil
 }
 
+// SignOut invalidates access tokens with a username and password
 func (y *YggAuth) SignOut(username, password string) (*AuthResponse, error) {
-	// Invalidate access tokens with a username and password
-	// Returns None on success, otherwise error dict
 	resp, err := y.request("/signout", yggPayload{
 		"username": username,
 		"password": password,
@@ -179,7 +190,8 @@ func (y *YggAuth) SignOut(username, password string) (*AuthResponse, error) {
 	return resp, nil
 }
 
-func (y *YggAuth) Invalidate(clientToken, accessToken string) error {
+// Invalidate invalidates the cached access token.
+func (y *YggAuth) Invalidate() error {
 	// Invalidate access tokens with y client/access token pair
 	// Returns nil on success, otherwise error
 	if y.info.AccessToken == "" {
@@ -195,6 +207,7 @@ func (y *YggAuth) Invalidate(clientToken, accessToken string) error {
 	return yggError(resp)
 }
 
+// Validate tries to validate the cached access token.
 func (y *YggAuth) Validate() error {
 	// Check if an access token is valid
 	// Returns nil on success (ie valid access token), otherwise error
@@ -210,24 +223,8 @@ func (y *YggAuth) Validate() error {
 	return yggError(resp)
 }
 
-func (y *YggAuth) request(endpoint string, payload interface{}) (*AuthResponse, error) {
-	url := "https://authserver.mojang.com" + endpoint
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := http.Post(url, "application/json", bytes.NewReader(data))
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	r := new(AuthResponse)
-	if err = json.NewDecoder(resp.Body).Decode(r); err != nil {
-		return nil, err
-	}
-	return r, nil
-}
-
+// JoinSession joins a session to initiate enctyption
+// between a Minecraft-compatible server and client.
 func (y *YggAuth) JoinSession(serverIdString string, publicKey []byte) (*SessionInfo, error) {
 	sharedSecret, err := GenerateSharedSecret()
 	if err != nil {
@@ -265,6 +262,24 @@ func (y *YggAuth) JoinSession(serverIdString string, publicKey []byte) (*Session
 	}
 
 	return &SessionInfo{sharedSecret, rsacipher}, nil
+}
+
+func (y *YggAuth) request(endpoint string, payload interface{}) (*AuthResponse, error) {
+	url := "https://authserver.mojang.com" + endpoint
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.Post(url, "application/json", bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	r := new(AuthResponse)
+	if err = json.NewDecoder(resp.Body).Decode(r); err != nil {
+		return nil, err
+	}
+	return r, nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -33,7 +33,6 @@ var (
 	ErrPacketMismatch    = errors.New("Packet id mismatch")
 	ErrServerAddrInvalid = errors.New("Server address invalid")
 	ErrNoResponse        = errors.New("No response from server")
-	ErrLoginMissing      = errors.New("Username or password missing")
 	ErrLoginFailed       = errors.New("Login failed")
 )
 
@@ -51,11 +50,6 @@ func Connect(cfg Config) (*Conn, error) {
 		if err != nil {
 			return nil, ErrServerAddrInvalid
 		}
-	}
-
-	u, p := cfg.Value("username"), cfg.Secret("password")
-	if u == "" || p == "" {
-		return nil, ErrLoginMissing
 	}
 
 	return dial(cfg, host, port)
@@ -168,34 +162,7 @@ func (c *Conn) Ping() (t time.Duration, err error) {
 	return
 }
 
-type StdinPasswdReq struct {
-	u, p string
-}
-
-func (q *StdinPasswdReq) AskLogin(savedUsername string) (username, password string, err error) {
-	if q.u != "" && q.p != "" {
-		return q.u, q.p, nil
-	}
-	fmt.Print("Username: ")
-	if _, err = fmt.Scan(&q.u); err != nil {
-		return "", "", err
-	}
-	fmt.Print("Password: ")
-	if _, err = fmt.Scan(&q.p); err != nil {
-		return "", "", err
-	}
-	return q.u, q.p, nil
-}
-
-type CfgPasswdReq struct {
-	cfg Config
-}
-
-func (q *CfgPasswdReq) AskLogin(savedUsername string) (username, password string, err error) {
-	return q.cfg.Value("username"), q.cfg.Secret("password"), nil
-}
-
-func (c *Conn) Login() error {
+func (c *Conn) Login(up UserPassworder) error {
 	/*
 		C->S : Handshake State=2
 		C->S : Login Start
@@ -215,8 +182,8 @@ func (c *Conn) Login() error {
 		NextState:       StateLogin,
 	})
 
-	ygg := NewYggAuth(NewConfigStore("auth", c.cfg), &CfgPasswdReq{c.cfg})
-	if err = ygg.Start(); err != nil {
+	ygg := NewYggAuth(NewConfigStore("auth", c.cfg))
+	if err = ygg.Start(up); err != nil {
 		return err
 	}
 

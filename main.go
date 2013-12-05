@@ -3,12 +3,11 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/tajtiattila/passwdprompt"
 )
 
 var (
-	username = flag.String("u", "", "Minecraft user name")
-	password = flag.String("p", "", "Minecraft password")
-	server   = flag.String("s", "", "Minecraft server address")
+	server = flag.String("s", "", "Minecraft server address")
 )
 
 func main() {
@@ -19,24 +18,12 @@ func main() {
 		panic(err)
 	}
 
-	if *username != "" {
-		cfg.SetValue("username", *username)
-	}
-	if *password != "" {
-		cfg.SetSecret("password", *password)
-	}
-
 	if *server != "" {
 		cfg.SetValue("server", *server)
 	}
 
 	if cfg.Value("server") == "" {
 		cfg.SetValue("server", "localhost:25565")
-	}
-
-	if cfg.Value("username") == "" || cfg.Secret("password") == "" {
-		fmt.Println("missing server/username/password. Specify once to first to have them saved in config")
-		return
 	}
 
 	fmt.Println("Connecting", cfg.Value("server"))
@@ -46,7 +33,9 @@ func main() {
 		panic(err)
 	}
 
-	err = c.Login()
+	err = c.Login(UserPassworderFunc(func() (u, p string, err error) {
+		return passwdprompt.GetUserPassword("Username: ", "Password: ")
+	}))
 	if err != nil {
 		panic(err)
 	}
