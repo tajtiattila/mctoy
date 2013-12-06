@@ -2,33 +2,6 @@ package main
 
 type PacketKind int
 
-type State uint
-
-const (
-	StateHandshake State = 0
-	StateStatus    State = 1
-	StateLogin     State = 2
-	StatePlay      State = 3
-)
-
-type Direction int
-
-const (
-	ToServer Direction = 1
-	ToClient Direction = 2
-	ToAny    Direction = 3
-)
-
-type PacketIdent struct {
-	St  State
-	Id  int
-	Dir Direction
-}
-
-type Packet interface {
-	Id() uint
-}
-
 // StateHandshake
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -37,10 +10,10 @@ type Handshake struct {
 	ProtocolVersion uint
 	ServerAddress   string
 	ServerPort      uint16
-	NextState       State
+	NextState       uint
 }
 
-func (Handshake) Id() uint { return 0x00 }
+func (Handshake) Id(PktDisp) uint { return 0x00 }
 
 // StateStatus
 ////////////////////////////////////////////////////////////////////////////////
@@ -48,7 +21,7 @@ func (Handshake) Id() uint { return 0x00 }
 type StatusRequest struct{}
 
 // 0x00 ->Server
-func (StatusRequest) Id() uint { return 0x00 }
+func (StatusRequest) Id(PktDisp) uint { return 0x00 }
 
 type StatusResponse string
 
@@ -56,35 +29,28 @@ type StatusResponse string
 	JsonData string
 }*/
 // 0x00 ->Client
-func (StatusResponse) Id() uint { return 0x00 }
+func (StatusResponse) Id(PktDisp) uint { return 0x00 }
 
-type Ping struct {
+type StatusPing struct {
 	// 0x01 ->Server ->Client
 	Time int64
 }
 
-func (Ping) Id() uint { return 0x01 }
+func (StatusPing) Id(PktDisp) uint { return 0x01 }
 
 // StateLogin
 ////////////////////////////////////////////////////////////////////////////////
-
-type KeepAlive struct {
-	// 0x00 ->Server ->Client
-	KeepAliveID int32
-}
-
-func (KeepAlive) Id() uint { return 0x00 }
 
 type LoginStart struct {
 	// 0x00 ->Server
 	Name string
 }
 
-func (LoginStart) Id() uint { return 0x00 }
+func (LoginStart) Id(PktDisp) uint { return 0x00 }
 
-type Disconnect string
+type LoginDisconnect string
 
-func (Disconnect) Id() uint { return 0x00 }
+func (LoginDisconnect) Id(PktDisp) uint { return 0x00 }
 
 type LoginSuccess struct {
 	// 0x02 ->Client
@@ -92,7 +58,7 @@ type LoginSuccess struct {
 	Username string
 }
 
-func (LoginSuccess) Id() uint { return 0x02 }
+func (LoginSuccess) Id(PktDisp) uint { return 0x02 }
 
 type EncryptionRequest struct {
 	// 0x01 ->Server
@@ -101,7 +67,7 @@ type EncryptionRequest struct {
 	VerifyToken []byte `mc:"len=int16"`
 }
 
-func (EncryptionRequest) Id() uint { return 0x01 }
+func (EncryptionRequest) Id(PktDisp) uint { return 0x01 }
 
 type EncryptionResponse struct {
 	// 0x01 ->Client
@@ -109,4 +75,14 @@ type EncryptionResponse struct {
 	VerifyToken  []byte `mc:"len=int16"`
 }
 
-func (EncryptionResponse) Id() uint { return 0x01 }
+func (EncryptionResponse) Id(PktDisp) uint { return 0x01 }
+
+// StatePlay
+////////////////////////////////////////////////////////////////////////////////
+
+type KeepAlive struct {
+	// 0x00 ->Server ->Client
+	KeepAliveID int32
+}
+
+func (KeepAlive) Id(PktDisp) uint { return 0x00 }

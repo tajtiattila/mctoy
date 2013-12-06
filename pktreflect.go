@@ -19,6 +19,16 @@ var (
 
 ////////////////////////////////////////////////////////////////////////////////
 
+type PacketMarshaler interface {
+	MarshalPacket(k *PacketEncoder)
+}
+
+type PacketUnmarshaler interface {
+	UnmarshalPacket(k *PacketDecoder)
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 func tagElems(t reflect.StructTag, f func(string)) {
 	ts := string(t)
 	for len(ts) > 0 {
@@ -79,7 +89,7 @@ func MakePacketDecoder(packet []byte) PacketDecoder {
 func (d *PacketDecoder) Error() error {
 	return d.err
 }
-func (d *PacketDecoder) get(size int) []byte {
+func (d *PacketDecoder) Get(size int) []byte {
 	if d.pos+size <= len(d.data) {
 		p := d.pos
 		d.pos += size
@@ -91,40 +101,55 @@ func (d *PacketDecoder) get(size int) []byte {
 	return nil
 }
 func (d *PacketDecoder) Int64() int64 {
-	if p := d.get(8); p != nil {
+	if p := d.Get(8); p != nil {
 		return int64(endian.Uint64(p))
 	}
 	return 0
 }
 func (d *PacketDecoder) Int32() int32 {
-	if p := d.get(4); p != nil {
+	if p := d.Get(4); p != nil {
 		return int32(endian.Uint32(p))
 	}
 	return 0
 }
 func (d *PacketDecoder) Int16() int16 {
-	if p := d.get(2); p != nil {
+	if p := d.Get(2); p != nil {
 		return int16(endian.Uint16(p))
 	}
 	return 0
 }
+func (d *PacketDecoder) Int8() int8 {
+	if p := d.Get(1); p != nil {
+		return int8(p[0])
+	}
+	return 0
+}
 func (d *PacketDecoder) Uint64() uint64 {
-	if p := d.get(8); p != nil {
+	if p := d.Get(8); p != nil {
 		return endian.Uint64(p)
 	}
 	return 0
 }
 func (d *PacketDecoder) Uint32() uint32 {
-	if p := d.get(4); p != nil {
+	if p := d.Get(4); p != nil {
 		return endian.Uint32(p)
 	}
 	return 0
 }
 func (d *PacketDecoder) Uint16() uint16 {
-	if p := d.get(2); p != nil {
+	if p := d.Get(2); p != nil {
 		return endian.Uint16(p)
 	}
 	return 0
+}
+func (d *PacketDecoder) Uint8() uint8 {
+	if p := d.Get(1); p != nil {
+		return p[0]
+	}
+	return 0
+}
+func (d *PacketDecoder) Bool() bool {
+	return d.Uint8() != 0
 }
 func (d *PacketDecoder) Varint() int {
 	res, l := binary.Varint(d.data[d.pos:])
@@ -145,7 +170,7 @@ func (d *PacketDecoder) Uvarint() uint {
 	return uint(res)
 }
 func (d *PacketDecoder) String() string {
-	b := d.get(int(d.Uvarint()))
+	b := d.Get(int(d.Uvarint()))
 	return string(b)
 }
 
@@ -164,6 +189,8 @@ func (d *PacketDecoder) ArrayLength(t reflect.StructTag) int {
 
 func (d *PacketDecoder) decodeValue(v reflect.Value, tag reflect.StructTag) {
 	switch v.Kind() {
+	case reflect.Bool:
+		v.SetBool(d.Bool())
 	case reflect.Int64:
 		v.SetInt(int64(d.Int64()))
 	case reflect.Uint64:
@@ -176,6 +203,10 @@ func (d *PacketDecoder) decodeValue(v reflect.Value, tag reflect.StructTag) {
 		v.SetInt(int64(d.Int16()))
 	case reflect.Uint16:
 		v.SetUint(uint64(d.Uint16()))
+	case reflect.Int8:
+		v.SetInt(int64(d.Int8()))
+	case reflect.Uint8:
+		v.SetUint(uint64(d.Uint8()))
 	case reflect.Int:
 		v.SetInt(int64(d.Varint()))
 	case reflect.Uint:
@@ -192,7 +223,7 @@ func (d *PacketDecoder) decodeValue(v reflect.Value, tag reflect.StructTag) {
 		var av reflect.Value
 		switch et.Kind() {
 		case reflect.Uint8:
-			av = reflect.ValueOf(d.get(l)).Convert(v.Type())
+			av = reflect.ValueOf(d.Get(l)).Convert(v.Type())
 		case reflect.Uint32:
 			s := make([]uint32, l)
 			for i := 0; i < l; i++ {
@@ -213,6 +244,9 @@ func (d *PacketDecoder) decodeValue(v reflect.Value, tag reflect.StructTag) {
 }
 
 func (d *PacketDecoder) Decode(i interface{}) {
+	if m, ok := i.(PacketUnmarshaler); ok {
+		m.UnmarshalPacket(d)
+	}
 	d.decodeValue(reflect.ValueOf(i).Elem(), "")
 }
 
@@ -233,7 +267,7 @@ func (e *PacketEncoder) Error() error {
 func (e *PacketEncoder) Bytes() []byte {
 	return e.data[:e.pos]
 }
-func (e *PacketEncoder) get(size int) []byte {
+func (e *PacketEncoder) Get(size int) []byte {
 	if e.pos+size <= len(e.data) {
 		p := e.pos
 		e.pos += size
@@ -244,34 +278,51 @@ func (e *PacketEncoder) get(size int) []byte {
 	return nil
 }
 func (e *PacketEncoder) PutInt64(i int64) {
-	if p := e.get(8); p != nil {
+	if p := e.Get(8); p != nil {
 		endian.PutUint64(p, uint64(i))
 	}
 }
 func (e *PacketEncoder) PutInt32(i int32) {
-	if p := e.get(4); p != nil {
+	if p := e.Get(4); p != nil {
 		endian.PutUint32(p, uint32(i))
 	}
 }
 func (e *PacketEncoder) PutInt16(i int16) {
-	if p := e.get(2); p != nil {
+	if p := e.Get(2); p != nil {
 		endian.PutUint16(p, uint16(i))
 	}
 }
+func (e *PacketEncoder) PutInt8(i int8) {
+	if p := e.Get(1); p != nil {
+		p[0] = uint8(i)
+	}
+}
 func (e *PacketEncoder) PutUint64(i uint64) {
-	if p := e.get(8); p != nil {
+	if p := e.Get(8); p != nil {
 		endian.PutUint64(p, i)
 	}
 }
 func (e *PacketEncoder) PutUint32(i uint32) {
-	if p := e.get(4); p != nil {
+	if p := e.Get(4); p != nil {
 		endian.PutUint32(p, i)
 	}
 }
 func (e *PacketEncoder) PutUint16(i uint16) {
-	if p := e.get(2); p != nil {
+	if p := e.Get(2); p != nil {
 		endian.PutUint16(p, i)
 	}
+}
+func (e *PacketEncoder) PutUint8(i uint8) {
+	if p := e.Get(1); p != nil {
+		p[0] = i
+	}
+}
+func (e *PacketEncoder) PutBool(b bool) {
+	var i uint8
+	if b {
+		i = 1
+	}
+	e.PutUint8(i)
 }
 func (e *PacketEncoder) PutVarint(i int) {
 	if e.pos+binary.MaxVarintLen64 <= len(e.data) {
@@ -293,7 +344,7 @@ func (e *PacketEncoder) PutUvarint(i uint) {
 }
 func (e *PacketEncoder) PutString(s string) {
 	e.PutUvarint(uint(len(s)))
-	if p := e.get(len(s)); p != nil {
+	if p := e.Get(len(s)); p != nil {
 		copy(p, s)
 	}
 }
@@ -315,6 +366,8 @@ func (e *PacketEncoder) encodeValue(v reflect.Value, tag reflect.StructTag) {
 	switch v.Kind() {
 	case reflect.Ptr:
 		e.encodeValue(v.Elem(), tag)
+	case reflect.Bool:
+		e.PutBool(v.Bool())
 	case reflect.Int64:
 		e.PutInt64(v.Int())
 	case reflect.Uint64:
@@ -343,7 +396,7 @@ func (e *PacketEncoder) encodeValue(v reflect.Value, tag reflect.StructTag) {
 		et := v.Type().Elem()
 		switch et.Kind() {
 		case reflect.Uint8:
-			if p := e.get(l); p != nil {
+			if p := e.Get(l); p != nil {
 				copy(p, v.Interface().([]byte))
 			}
 		case reflect.Uint32:
@@ -363,5 +416,8 @@ func (e *PacketEncoder) encodeValue(v reflect.Value, tag reflect.StructTag) {
 }
 
 func (e *PacketEncoder) Encode(i interface{}) {
+	if m, ok := i.(PacketMarshaler); ok {
+		m.MarshalPacket(e)
+	}
 	e.encodeValue(reflect.ValueOf(i), "")
 }

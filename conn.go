@@ -21,6 +21,7 @@ type Conn struct {
 	w       *PacketWriter
 	wbuf    []byte
 	rbufsiz int
+	state   CxnState
 }
 
 const (
@@ -75,6 +76,8 @@ func dial(s PersistentStore, host string, port int) (*Conn, error) {
 	}
 	c.r, c.w = InitPacketIO(c.c, nil)
 
+	c.state = StateHandshake
+
 	return c, nil
 }
 
@@ -112,12 +115,10 @@ func (c *Conn) ServerStatus() (*ServerStatus, error) {
 		S->C : Ping
 	*/
 
-	err := c.Send(Handshake{
-		ProtocolVersion: 4, // 1.7.2
-		ServerAddress:   c.host,
-		ServerPort:      uint16(c.port),
-		NextState:       StateStatus,
-	})
+	err := c.Handshake(StateStatus)
+	if err != nil {
+		return nil, err
+	}
 
 	err = c.Send(StatusRequest{})
 	if err != nil {
@@ -147,11 +148,11 @@ func (c *Conn) ServerStatus() (*ServerStatus, error) {
 }
 
 func (c *Conn) Ping() (t time.Duration, err error) {
-	err = c.Send(Ping{time.Now().Unix()})
+	err = c.Send(StatusPing{time.Now().Unix()})
 	if err != nil {
 		return
 	}
-	var p Ping
+	var p StatusPing
 	if err = c.Recv(&p); err != nil {
 		return
 	}
@@ -172,12 +173,10 @@ func (c *Conn) Login(up UserPassworder) error {
 
 	var err error
 
-	err = c.Send(Handshake{
-		ProtocolVersion: 4, // 1.7.2
-		ServerAddress:   c.host,
-		ServerPort:      uint16(c.port),
-		NextState:       StateLogin,
-	})
+	err = c.Handshake(StateLogin)
+	if err != nil {
+		return err
+	}
 
 	ygg := NewYggAuth(c.perstor)
 	if err = ygg.Start(up); err != nil {
@@ -216,11 +215,11 @@ func (c *Conn) Login(up UserPassworder) error {
 
 	switch pkid {
 	case 0x00:
-		var d Disconnect
+		var d LoginDisconnect
 		if err = c.Peek(&d); err != nil {
 			return err
 		}
-		fmt.Println("Disconnect:", string(d))
+		fmt.Println("LoginDisconnect:", string(d))
 		return ErrLoginFailed
 	default:
 		fmt.Println("Unexpected packet received, id:", pkid)
@@ -236,9 +235,22 @@ func (c *Conn) Login(up UserPassworder) error {
 	return nil
 }
 
+func (c *Conn) Handshake(nextstate CxnState) (err error) {
+	err = c.Send(Handshake{
+		ProtocolVersion: 4, // 1.7.2
+		ServerAddress:   c.host,
+		ServerPort:      uint16(c.port),
+		NextState:       uint(nextstate),
+	})
+	if err == nil {
+		c.state = nextstate
+	}
+	return
+}
+
 func (c *Conn) Send(p Packet) error {
 	pkc := MakePacketEncoder(c.wbuf)
-	pkc.PutUvarint(p.Id())
+	pkc.PutUvarint(p.Id(PktDisp{S: c.state, D: Serverbound}))
 	pkc.Encode(p)
 	if pkc.Error() != nil {
 		return pkc.Error()
@@ -258,7 +270,7 @@ func (c *Conn) PeekId() (uint, bool) {
 func (c *Conn) Peek(p Packet) (err error) {
 	pkc := MakePacketDecoder(c.r.Bytes())
 	id := pkc.Uvarint()
-	if p.Id() != id {
+	if p.Id(PktDisp{S: c.state, D: Clientbound}) != id {
 		return ErrPacketMismatch
 	}
 	pkc.Decode(p)
