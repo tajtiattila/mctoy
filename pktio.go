@@ -14,30 +14,34 @@ var (
 	ErrBufferShort = errors.New("Buffer insufficient for packet")
 )
 
+// create a PacketScanner and PacketWriter for the given io.ReadWriter,
+// typically a net.Conn instance. Argument secret is used to set up
+// AES/CFB8 encryption, in case it is nil, no encryption is used.
 func InitPacketIO(h io.ReadWriter, secret []byte) (*PacketScanner, *PacketWriter) {
-	if secret == nil {
-		return NewPacketScanner(h), NewPacketWriter(h)
-	}
-	aesc, err := aes.NewCipher(secret)
-	if err != nil {
-		panic(err)
-	}
 	var (
 		sr io.Reader
 		sw io.Writer
 	)
-	sr = cipher.StreamReader{
-		R: h,
-		S: NewCFB8Decrypter(aesc, secret),
-	}
-	sw = cipher.StreamWriter{
-		W: h,
-		S: NewCFB8Encrypter(aesc, secret),
+	if secret == nil {
+		sr, sw = h, h
+	} else {
+		aesc, err := aes.NewCipher(secret)
+		if err != nil {
+			panic(err)
+		}
+		sr = cipher.StreamReader{
+			R: h,
+			S: NewCFB8Decrypter(aesc, secret),
+		}
+		sw = cipher.StreamWriter{
+			W: h,
+			S: NewCFB8Encrypter(aesc, secret),
+		}
 	}
 	if PACKETDEBUG {
 		sr, sw = NewDebugReader(sr, os.Stdout), NewDebugWriter(sw, os.Stdout)
 	}
-	return NewPacketScanner(sr), NewPacketWriter(sw)
+	return NewPacketScanner(sr), NewPacketWriter(h)
 }
 
 type PacketScanner struct {
@@ -57,11 +61,13 @@ func NewPacketScannerSize(i io.Reader, bufsiz int) *PacketScanner {
 	return &PacketScanner{rd: i, buf: make([]byte, bufsiz)}
 }
 
+// Bytes returns the packet found by Scan. The returned
+// byte slice is only valid until the next call to Scan.
 func (s *PacketScanner) Bytes() []byte {
 	return s.buf[s.o:s.w]
 }
 
-// Scan() returns complete Minecraft packets
+// Scan reads the next complete Minecraft packet.
 func (s *PacketScanner) Scan() error {
 	if s.w != 0 {
 		copy(s.buf, s.buf[s.w:s.r])
@@ -74,11 +80,6 @@ func (s *PacketScanner) Scan() error {
 			epkt = nl + int(npkt0)
 			if nl != 0 && epkt <= s.r {
 				s.o, s.w = nl, epkt
-				if PACKETDEBUG {
-					d := MakeDumper(os.Stdout)
-					d.line("pktscan:", nil)
-					d.bytes(s.Bytes())
-				}
 				return nil
 			}
 		}
