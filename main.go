@@ -5,6 +5,7 @@ import (
 	"fmt"
 	mcnet "github.com/tajtiattila/mctoy/net"
 	"github.com/tajtiattila/passwdprompt"
+	"io"
 	"os"
 	"sync"
 	"time"
@@ -21,6 +22,7 @@ type DemoHandler struct {
 	X, Y, Z    float64
 	Yaw, Pitch float32
 	OnGround   bool
+	log        io.ReadWriter
 }
 
 func (h *DemoHandler) SendPosition(c *mcnet.Conn) error {
@@ -49,7 +51,7 @@ func (h *DemoHandler) HandlePacket(
 ) (err error) {
 	h.mtx.Lock()
 	defer h.mtx.Unlock()
-	fmt.Printf("%02x %s\n", pkid, pkname)
+	fmt.Fprintf(h.log, "%02x %s\n", pkid, pkname)
 	switch p := pk.(type) {
 	case *mcnet.KeepAlive:
 		err = c.Send(p)
@@ -66,12 +68,11 @@ func (h *DemoHandler) HandlePacket(
 			go func() {
 				for _ = range time.Tick(time.Second / 20) {
 					err := h.SendPosition(c)
-					fmt.Println("-> SendPosition:", err)
+					fmt.Fprintln(h.log, "-> SendPosition:", err)
 				}
 			}()
 		}
 	}
-	//fmt.Printf("%#v\n\n", pk)
 	return
 }
 
@@ -112,7 +113,10 @@ func main() {
 		fail(err)
 	}
 
-	err = c.Run(&DemoHandler{})
+	h := &DemoHandler{log: NewRoundBuf()}
+	err = c.Run(h)
+	io.Copy(os.Stdout, h.log)
+
 	if err != nil {
 		fail(err)
 	}
