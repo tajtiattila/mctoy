@@ -1,5 +1,15 @@
 package main
 
+// StatePlay
+////////////////////////////////////////////////////////////////////////////////
+
+type KeepAlive struct {
+	// 0x00 ->Server ->Client
+	KeepAliveID int32
+}
+
+func (KeepAlive) Id() (uint, uint) { return 0x00, 0x00 }
+
 // 0x01 = Join Game
 type JoinGame struct {
 	EntityID   int32  // The player's Entity ID
@@ -10,14 +20,14 @@ type JoinGame struct {
 	LevelType  string // default, flat, largeBiomes, amplified, default_1_1
 }
 
-func (JoinGame) Id(PktDisp) uint { return 0x01 }
+func (JoinGame) Id() (uint, uint) { return 0x01, PktInvalid }
 
 // 0x02 = Chat Message
 type ServerChatMessage struct {
 	JSONData string // https://gist.github.com/thinkofdeath/e882ce057ed83bac0a1c , Limited to 32767 bytes
 }
 
-func (ServerChatMessage) Id(PktDisp) uint { return 0x02 }
+func (ServerChatMessage) Id() (uint, uint) { return 0x02, PktInvalid }
 
 // 0x03 = Time Update
 type TimeUpdate struct {
@@ -25,7 +35,7 @@ type TimeUpdate struct {
 	TimeOfDay     int64 // The world (or region) time, in ticks. If negative the sun will stop moving at the Math.abs of the time
 }
 
-func (TimeUpdate) Id(PktDisp) uint { return 0x03 }
+func (TimeUpdate) Id() (uint, uint) { return 0x03, PktInvalid }
 
 // 0x04 = Entity Equipment
 type EntityEquipment struct {
@@ -34,7 +44,7 @@ type EntityEquipment struct {
 	Item     Slot  // Item in slot format
 }
 
-func (EntityEquipment) Id(PktDisp) uint { return 0x04 }
+func (EntityEquipment) Id() (uint, uint) { return 0x04, PktInvalid }
 
 // 0x05 = Spawn Position
 type SpawnPosition struct {
@@ -43,7 +53,7 @@ type SpawnPosition struct {
 	Z int32 // in block coordinates
 }
 
-func (SpawnPosition) Id(PktDisp) uint { return 0x05 }
+func (SpawnPosition) Id() (uint, uint) { return 0x05, PktInvalid }
 
 // 0x06 = Update Health
 type UpdateHealth struct {
@@ -52,7 +62,7 @@ type UpdateHealth struct {
 	FoodSaturation float32 // Seems to vary from 0.0 to 5.0 in integer increments
 }
 
-func (UpdateHealth) Id(PktDisp) uint { return 0x06 }
+func (UpdateHealth) Id() (uint, uint) { return 0x06, PktInvalid }
 
 // 0x07 = Respawn
 type Respawn struct {
@@ -62,7 +72,7 @@ type Respawn struct {
 	LevelType  string // Same as [[Protocol#Join_Game|Join Game]]
 }
 
-func (Respawn) Id(PktDisp) uint { return 0x07 }
+func (Respawn) Id() (uint, uint) { return 0x07, PktInvalid }
 
 // 0x08 = Player Position And Look (Clientbound)
 type ServerPlayerPositionAndLook struct {
@@ -74,14 +84,14 @@ type ServerPlayerPositionAndLook struct {
 	OnGround bool    // True if the client is on the ground, False otherwise
 }
 
-func (ServerPlayerPositionAndLook) Id(d PktDisp) uint { return bound(d, 0x08, 0x06) }
+func (ServerPlayerPositionAndLook) Id() (uint, uint) { return 0x08, PktInvalid }
 
 // 0x09 = Held Item Change
 type ServerHeldItemChange struct {
 	Slot int8 // The slot which the player has selected (0-8)
 }
 
-func (ServerHeldItemChange) Id(PktDisp) uint { return 0x09 }
+func (ServerHeldItemChange) Id() (uint, uint) { return 0x09, PktInvalid }
 
 // 0x0A = Use Bed
 type UseBed struct {
@@ -91,7 +101,7 @@ type UseBed struct {
 	Z        int32 // Bed headboard Z as block coordinate
 }
 
-func (UseBed) Id(PktDisp) uint { return 0x0A }
+func (UseBed) Id() (uint, uint) { return 0x0A, PktInvalid }
 
 // 0x0B = Animation
 type ServerAnimation struct {
@@ -99,7 +109,7 @@ type ServerAnimation struct {
 	Animation uint8 // Animation ID
 }
 
-func (ServerAnimation) Id(PktDisp) uint { return 0x0B }
+func (ServerAnimation) Id() (uint, uint) { return 0x0B, PktInvalid }
 
 // 0x0C = Spawn Player
 type SpawnPlayer struct {
@@ -115,7 +125,7 @@ type SpawnPlayer struct {
 	Metadata    EntityMetadata // The client will crash if no metadata is sent
 }
 
-func (SpawnPlayer) Id(PktDisp) uint { return 0x0C }
+func (SpawnPlayer) Id() (uint, uint) { return 0x0C, PktInvalid }
 
 // 0x0D = Collect Item
 type CollectItem struct {
@@ -123,7 +133,7 @@ type CollectItem struct {
 	CollectorEntityID int32
 }
 
-func (CollectItem) Id(PktDisp) uint { return 0x0D }
+func (CollectItem) Id() (uint, uint) { return 0x0D, PktInvalid }
 
 // 0x0E = Spawn Object
 type SpawnObject struct {
@@ -137,7 +147,7 @@ type SpawnObject struct {
 	Data     ObjectData
 }
 
-func (SpawnObject) Id(PktDisp) uint { return 0x0E }
+func (SpawnObject) Id() (uint, uint) { return 0x0E, PktInvalid }
 
 // 0x0F = Spawn Mob
 type SpawnMob struct {
@@ -155,7 +165,7 @@ type SpawnMob struct {
 	Metadata  EntityMetadata
 }
 
-func (SpawnMob) Id(PktDisp) uint { return 0x0F }
+func (SpawnMob) Id() (uint, uint) { return 0x0F, PktInvalid }
 
 // 0x10 = Spawn Painting
 type SpawnPainting struct {
@@ -167,7 +177,7 @@ type SpawnPainting struct {
 	Direction int32  // Direction the painting faces (0 -z, 1 -x, 2 +z, 3 +x)
 }
 
-func (SpawnPainting) Id(PktDisp) uint { return 0x10 }
+func (SpawnPainting) Id() (uint, uint) { return 0x10, PktInvalid }
 
 // 0x11 = Spawn Experience Orb
 type SpawnExperienceOrb struct {
@@ -178,7 +188,7 @@ type SpawnExperienceOrb struct {
 	Count    int16 // The amount of experience this orb will reward once collected
 }
 
-func (SpawnExperienceOrb) Id(PktDisp) uint { return 0x11 }
+func (SpawnExperienceOrb) Id() (uint, uint) { return 0x11, PktInvalid }
 
 // 0x12 = Entity Velocity
 type EntityVelocity struct {
@@ -188,21 +198,21 @@ type EntityVelocity struct {
 	VelocityZ int16 // Velocity on the Z axis
 }
 
-func (EntityVelocity) Id(PktDisp) uint { return 0x12 }
+func (EntityVelocity) Id() (uint, uint) { return 0x12, PktInvalid }
 
 // 0x13 = Destroy Entities
 type DestroyEntities struct {
-	EntityIDs []int32 `mc:"len=int8"` // The list of entities of destroy
+	EntityIDs []uint32 `mc:"len=int8"` // The list of entities of destroy
 }
 
-func (DestroyEntities) Id(PktDisp) uint { return 0x13 }
+func (DestroyEntities) Id() (uint, uint) { return 0x13, PktInvalid }
 
 // 0x14 = Entity
 type Entity struct {
 	EntityID int32 // Entity's ID
 }
 
-func (Entity) Id(PktDisp) uint { return 0x14 }
+func (Entity) Id() (uint, uint) { return 0x14, PktInvalid }
 
 // 0x15 = Entity Relative Move
 type EntityRelativeMove struct {
@@ -212,7 +222,7 @@ type EntityRelativeMove struct {
 	DZ       int8  // Change in Z position as a [[Data_Types#Fixed-point_numbers|Fixed-Point number]]
 }
 
-func (EntityRelativeMove) Id(PktDisp) uint { return 0x15 }
+func (EntityRelativeMove) Id() (uint, uint) { return 0x15, PktInvalid }
 
 // 0x16 = Entity Look
 type EntityLook struct {
@@ -221,7 +231,7 @@ type EntityLook struct {
 	Pitch    int8  // The Y Axis rotation as a fraction of 360
 }
 
-func (EntityLook) Id(PktDisp) uint { return 0x16 }
+func (EntityLook) Id() (uint, uint) { return 0x16, PktInvalid }
 
 // 0x17 = Entity Look and Relative Move
 type EntityLookAndRelativeMove struct {
@@ -233,7 +243,7 @@ type EntityLookAndRelativeMove struct {
 	Pitch    int8  // The Y Axis rotation as a fraction of 360
 }
 
-func (EntityLookAndRelativeMove) Id(PktDisp) uint { return 0x17 }
+func (EntityLookAndRelativeMove) Id() (uint, uint) { return 0x17, PktInvalid }
 
 // 0x18 = Entity Teleport
 type EntityTeleport struct {
@@ -245,7 +255,7 @@ type EntityTeleport struct {
 	Pitch    int8  // The Y Axis rotation as a fraction of 360
 }
 
-func (EntityTeleport) Id(PktDisp) uint { return 0x18 }
+func (EntityTeleport) Id() (uint, uint) { return 0x18, PktInvalid }
 
 // 0x19 = Entity Head Look
 type EntityHeadLook struct {
@@ -253,7 +263,7 @@ type EntityHeadLook struct {
 	HeadYaw  int8  // Head yaw in steps of 2p/256
 }
 
-func (EntityHeadLook) Id(PktDisp) uint { return 0x19 }
+func (EntityHeadLook) Id() (uint, uint) { return 0x19, PktInvalid }
 
 // 0x1A = Entity Status
 type EntityStatus struct {
@@ -261,7 +271,7 @@ type EntityStatus struct {
 	EntityStatus int8  // See below
 }
 
-func (EntityStatus) Id(PktDisp) uint { return 0x1A }
+func (EntityStatus) Id() (uint, uint) { return 0x1A, PktInvalid }
 
 // 0x1B = Attach Entity
 type AttachEntity struct {
@@ -270,7 +280,7 @@ type AttachEntity struct {
 	Leash     bool  // If true leashes the entity to the vehicle
 }
 
-func (AttachEntity) Id(PktDisp) uint { return 0x1B }
+func (AttachEntity) Id() (uint, uint) { return 0x1B, PktInvalid }
 
 // 0x1C = Entity Metadata
 type EntityMetadataInfo struct {
@@ -278,7 +288,7 @@ type EntityMetadataInfo struct {
 	Metadata EntityMetadata
 }
 
-func (EntityMetadata) Id(PktDisp) uint { return 0x1C }
+func (EntityMetadata) Id() (uint, uint) { return 0x1C, PktInvalid }
 
 // 0x1D = Entity Effect
 type EntityEffect struct {
@@ -288,7 +298,7 @@ type EntityEffect struct {
 	Duration  int16
 }
 
-func (EntityEffect) Id(PktDisp) uint { return 0x1D }
+func (EntityEffect) Id() (uint, uint) { return 0x1D, PktInvalid }
 
 // 0x1E = Remove Entity Effect
 type RemoveEntityEffect struct {
@@ -296,7 +306,7 @@ type RemoveEntityEffect struct {
 	EffectID int8
 }
 
-func (RemoveEntityEffect) Id(PktDisp) uint { return 0x1E }
+func (RemoveEntityEffect) Id() (uint, uint) { return 0x1E, PktInvalid }
 
 // 0x1F = Set Experience
 type SetExperience struct {
@@ -305,7 +315,7 @@ type SetExperience struct {
 	TotalExperience int16
 }
 
-func (SetExperience) Id(PktDisp) uint { return 0x1F }
+func (SetExperience) Id() (uint, uint) { return 0x1F, PktInvalid }
 
 // 0x20 = Entity Properties
 type EntityProperties struct {
@@ -313,7 +323,7 @@ type EntityProperties struct {
 	Properties []PropertyData `mc:"len=int32"`
 }
 
-func (EntityProperties) Id(PktDisp) uint { return 0x20 }
+func (EntityProperties) Id() (uint, uint) { return 0x20, PktInvalid }
 
 // 0x21 = Chunk Data
 type ChunkData struct {
@@ -325,7 +335,7 @@ type ChunkData struct {
 	CompressedData     []byte `mc:"len=int32"` // The chunk data is compressed using Zlib Deflate
 }
 
-func (ChunkData) Id(PktDisp) uint { return 0x21 }
+func (ChunkData) Id() (uint, uint) { return 0x21, PktInvalid }
 
 // 0x22 = Multi Block Change
 type MultiBlockChange struct {
@@ -335,7 +345,7 @@ type MultiBlockChange struct {
 	Records     []Record `mc:"len=int32div4"` // The total size of the data is in bytes. Should always be 4*record count
 }
 
-func (MultiBlockChange) Id(PktDisp) uint { return 0x22 }
+func (MultiBlockChange) Id() (uint, uint) { return 0x22, PktInvalid }
 
 // 0x23 = Block Change
 type BlockChange struct {
@@ -346,7 +356,7 @@ type BlockChange struct {
 	BlockData uint8 // The new data for the block
 }
 
-func (BlockChange) Id(PktDisp) uint { return 0x23 }
+func (BlockChange) Id() (uint, uint) { return 0x23, PktInvalid }
 
 // 0x24 = Block Action
 type BlockAction struct {
@@ -358,7 +368,7 @@ type BlockAction struct {
 	BlockType uint  // The block type for the block
 }
 
-func (BlockAction) Id(PktDisp) uint { return 0x24 }
+func (BlockAction) Id() (uint, uint) { return 0x24, PktInvalid }
 
 // 0x25 = Block Break Animation
 type BlockBreakAnimation struct {
@@ -369,7 +379,7 @@ type BlockBreakAnimation struct {
 	DestroyStage int8  // 0 - 9
 }
 
-func (BlockBreakAnimation) Id(PktDisp) uint { return 0x25 }
+func (BlockBreakAnimation) Id() (uint, uint) { return 0x25, PktInvalid }
 
 // 0x26 = Map Chunk Bulk
 type MapChunkBulk struct {
@@ -380,7 +390,7 @@ type MapChunkBulk struct {
 	Meta         MapChunkBulkMeta
 }
 
-func (MapChunkBulk) Id(PktDisp) uint { return 0x26 }
+func (MapChunkBulk) Id() (uint, uint) { return 0x26, PktInvalid }
 func (p *MapChunkBulk) MarshalPacket(k *PacketEncoder) {
 	k.PutInt16(p.ChunkColumnCount)
 	k.PutUint32(uint32(len(p.Data)))
@@ -411,7 +421,7 @@ type Explosion struct {
 	PlayerMotionZ float32 // Z velocity of the player being pushed by the explosion
 }
 
-func (Explosion) Id(PktDisp) uint { return 0x27 }
+func (Explosion) Id() (uint, uint) { return 0x27, PktInvalid }
 
 // 0x28 = Effect
 type Effect struct {
@@ -423,7 +433,7 @@ type Effect struct {
 	DisableRelativeVolume bool  // See above
 }
 
-func (Effect) Id(PktDisp) uint { return 0x28 }
+func (Effect) Id() (uint, uint) { return 0x28, PktInvalid }
 
 // 0x29 = Sound Effect
 type SoundEffect struct {
@@ -435,7 +445,7 @@ type SoundEffect struct {
 	Pitch           uint8   // 63 is 100%, can be more
 }
 
-func (SoundEffect) Id(PktDisp) uint { return 0x29 }
+func (SoundEffect) Id() (uint, uint) { return 0x29, PktInvalid }
 
 // 0x2A = Particle
 type Particle struct {
@@ -450,7 +460,7 @@ type Particle struct {
 	NumberOfParticles int32   // The number of particles to create
 }
 
-func (Particle) Id(PktDisp) uint { return 0x2A }
+func (Particle) Id() (uint, uint) { return 0x2A, PktInvalid }
 
 // 0x2B = Change Game State
 type ChangeGameState struct {
@@ -458,7 +468,7 @@ type ChangeGameState struct {
 	Value  float32 // Depends on reason
 }
 
-func (ChangeGameState) Id(PktDisp) uint { return 0x2B }
+func (ChangeGameState) Id() (uint, uint) { return 0x2B, PktInvalid }
 
 // 0x2C = Spawn Global Entity
 type SpawnGlobalEntity struct {
@@ -469,7 +479,7 @@ type SpawnGlobalEntity struct {
 	Z        int32 // Thunderbolt Z a [[Data_Types#Fixed-point_numbers|fixed-point number]]
 }
 
-func (SpawnGlobalEntity) Id(PktDisp) uint { return 0x2C }
+func (SpawnGlobalEntity) Id() (uint, uint) { return 0x2C, PktInvalid }
 
 // 0x2D = Open Window
 type OpenWindow struct {
@@ -481,7 +491,7 @@ type OpenWindow struct {
 	EntityID               int32  // EntityHorse's entityId. Only sent when window type is equal to 11 (AnimalChest).
 }
 
-func (OpenWindow) Id(PktDisp) uint { return 0x2D }
+func (OpenWindow) Id() (uint, uint) { return 0x2D, PktInvalid }
 
 // 0x2E = Close Window (Clientbound)
 // 0x0D = Close Window (Serverbound)
@@ -489,7 +499,7 @@ type CloseWindow struct {
 	WindowID uint8 // This is the id of the window that was closed. 0 for inventory.
 }
 
-func (CloseWindow) Id(d PktDisp) uint { return bound(d, 0x2E, 0x0D) }
+func (CloseWindow) Id() (uint, uint) { return 0x2E, 0x0D }
 
 // 0x2F = Set Slot
 type SetSlot struct {
@@ -498,16 +508,15 @@ type SetSlot struct {
 	SlotData Slot
 }
 
-func (SetSlot) Id(PktDisp) uint { return 0x2F }
+func (SetSlot) Id() (uint, uint) { return 0x2F, PktInvalid }
 
 // 0x30 = Window Items
 type WindowItems struct {
 	WindowID uint8  // The id of window which items are being sent for. 0 for player inventory.
-	Count    int16  // The number of slots (see below)
 	SlotData []Slot `mc:"len=int16"`
 }
 
-func (WindowItems) Id(PktDisp) uint { return 0x30 }
+func (WindowItems) Id() (uint, uint) { return 0x30, PktInvalid }
 
 // 0x31 = Window Property
 type WindowProperty struct {
@@ -516,7 +525,7 @@ type WindowProperty struct {
 	Value    int16 // The new value for the property.
 }
 
-func (WindowProperty) Id(PktDisp) uint { return 0x31 }
+func (WindowProperty) Id() (uint, uint) { return 0x31, PktInvalid }
 
 // 0x32 = Confirm Transaction (Clientbound)
 // 0x0F = Confirm Transaction (Serverbound)
@@ -526,7 +535,7 @@ type ConfirmTransaction struct {
 	Accepted     bool  // Whether the action was accepted.
 }
 
-func (ConfirmTransaction) Id(d PktDisp) uint { return bound(d, 0x32, 0x0F) }
+func (ConfirmTransaction) Id() (uint, uint) { return 0x32, 0x0F }
 
 // 0x33 = Update Sign (Clientbound)
 // 0x12 = Update Sign (Serverbound)
@@ -540,7 +549,7 @@ type UpdateSign struct {
 	Line4 string // Fourth line of text in the sign
 }
 
-func (UpdateSign) Id(d PktDisp) uint { return bound(d, 0x33, 0x12) }
+func (UpdateSign) Id() (uint, uint) { return 0x33, 0x12 }
 
 // 0x34 = Maps
 type Maps struct {
@@ -548,7 +557,7 @@ type Maps struct {
 	Data       []byte `mc:"len=int16"`
 }
 
-func (Maps) Id(PktDisp) uint { return 0x34 }
+func (Maps) Id() (uint, uint) { return 0x34, PktInvalid }
 
 // 0x35 = Update Block Entity
 type UpdateBlockEntity struct {
@@ -559,7 +568,7 @@ type UpdateBlockEntity struct {
 	NBTData []byte `mc:"len=int16"` // Present if data length > 0. Compressed with [[wikipedia:Gzip|gzip]]. Varies
 }
 
-func (UpdateBlockEntity) Id(PktDisp) uint { return 0x35 }
+func (UpdateBlockEntity) Id() (uint, uint) { return 0x35, PktInvalid }
 
 // 0x36 = Sign Editor Open
 type SignEditorOpen struct {
@@ -568,14 +577,14 @@ type SignEditorOpen struct {
 	Z int32 // Z in block coordinates
 }
 
-func (SignEditorOpen) Id(PktDisp) uint { return 0x36 }
+func (SignEditorOpen) Id() (uint, uint) { return 0x36, PktInvalid }
 
 // 0x37 = Statistics
 type Statistics struct {
 	Values []StatisticsEntry
 }
 
-func (Statistics) Id(PktDisp) uint { return 0x37 }
+func (Statistics) Id() (uint, uint) { return 0x37, PktInvalid }
 
 // 0x38 = Player List Item
 type PlayerListItem struct {
@@ -584,7 +593,7 @@ type PlayerListItem struct {
 	Ping       int16  // Ping, presumably in ms.
 }
 
-func (PlayerListItem) Id(PktDisp) uint { return 0x38 }
+func (PlayerListItem) Id() (uint, uint) { return 0x38, PktInvalid }
 
 // 0x39 = Player Abilities (Clientbound)
 // 0x13 = Player Abilities (Serverbound)
@@ -594,14 +603,14 @@ type PlayerAbilities struct {
 	WalkingSpeed float32 // previous integer value divided by 250
 }
 
-func (PlayerAbilities) Id(d PktDisp) uint { return bound(d, 0x39, 0x13) }
+func (PlayerAbilities) Id() (uint, uint) { return 0x39, 0x13 }
 
 // 0x3A = Tab-Complete
 type TabCompleteResponse struct {
-	Match []string `mc:"len=int"` // Possible Tab-Complete
+	Match []string // Possible Tab-Complete
 }
 
-func (TabCompleteResponse) Id(PktDisp) uint { return 0x3A }
+func (TabCompleteResponse) Id() (uint, uint) { return 0x3A, PktInvalid }
 
 // 0x3B = Scoreboard Objective
 type ScoreboardObjective struct {
@@ -610,7 +619,7 @@ type ScoreboardObjective struct {
 	CreateRemove   int8   // 0 to create the scoreboard. 1 to remove the scoreboard. 2 to update the display text.
 }
 
-func (ScoreboardObjective) Id(PktDisp) uint { return 0x3B }
+func (ScoreboardObjective) Id() (uint, uint) { return 0x3B, PktInvalid }
 
 // 0x3C = Update Score
 type UpdateScore struct {
@@ -620,7 +629,7 @@ type UpdateScore struct {
 	Value        int32  // The score to be displayed next to the entry. Only sent when Update/Remove does not equal 1.
 }
 
-func (UpdateScore) Id(PktDisp) uint { return 0x3C }
+func (UpdateScore) Id() (uint, uint) { return 0x3C, PktInvalid }
 
 // 0x3D = Display Scoreboard
 type DisplayScoreboard struct {
@@ -628,7 +637,7 @@ type DisplayScoreboard struct {
 	ScoreName string // The unique name for the scoreboard to be displayed.
 }
 
-func (DisplayScoreboard) Id(PktDisp) uint { return 0x3D }
+func (DisplayScoreboard) Id() (uint, uint) { return 0x3D, PktInvalid }
 
 // 0x3E = Teams
 type Teams struct {
@@ -641,7 +650,7 @@ type Teams struct {
 	Players         []string `mc:"len=int16"` // Only if Mode = 0 or 3 or 4. Players to be added/remove from the team.
 }
 
-func (Teams) Id(PktDisp) uint { return 0x3E }
+func (Teams) Id() (uint, uint) { return 0x3E, PktInvalid }
 
 // 0x3F = Plugin Message
 // 0x17 = Plugin Message
@@ -650,21 +659,21 @@ type PluginMessage struct {
 	Data    []byte `mc:"len=int16"` // Any data.
 }
 
-func (PluginMessage) Id(d PktDisp) uint { return bound(d, 0x3F, 0x17) }
+func (PluginMessage) Id() (uint, uint) { return 0x3F, 0x17 }
 
 // 0x40 = Disconnect
 type Disconnect struct {
 	Reason string // Displayed to the client when the connection terminates. Must be valid JSON.
 }
 
-func (Disconnect) Id(PktDisp) uint { return 0x40 }
+func (Disconnect) Id() (uint, uint) { return 0x40, PktInvalid }
 
 // 0x01 = Chat Message
 type ClientChatMessage struct {
 	Message string
 }
 
-func (ClientChatMessage) Id(PktDisp) uint { return 0x01 }
+func (ClientChatMessage) Id() (uint, uint) { return PktInvalid, 0x01 }
 
 // 0x02 = Use Entity
 type UseEntity struct {
@@ -672,14 +681,14 @@ type UseEntity struct {
 	Mouse  int8 // 0 = Left-click, 1 = Right-click
 }
 
-func (UseEntity) Id(PktDisp) uint { return 0x02 }
+func (UseEntity) Id() (uint, uint) { return PktInvalid, 0x02 }
 
 // 0x03 = Player
 type Player struct {
 	OnGround bool // True if the client is on the ground, False otherwise
 }
 
-func (Player) Id(PktDisp) uint { return 0x03 }
+func (Player) Id() (uint, uint) { return PktInvalid, 0x03 }
 
 // 0x04 = Player Position
 type PlayerPosition struct {
@@ -690,7 +699,7 @@ type PlayerPosition struct {
 	OnGround bool    // True if the client is on the ground, False otherwise
 }
 
-func (PlayerPosition) Id(PktDisp) uint { return 0x04 }
+func (PlayerPosition) Id() (uint, uint) { return PktInvalid, 0x04 }
 
 // 0x05 = Player Look
 type PlayerLook struct {
@@ -699,7 +708,7 @@ type PlayerLook struct {
 	OnGround bool    // True if the client is on the ground, False otherwise
 }
 
-func (PlayerLook) Id(PktDisp) uint { return 0x05 }
+func (PlayerLook) Id() (uint, uint) { return PktInvalid, 0x05 }
 
 // 0x06 = Player Position And Look
 type ClientPlayerPositionAndLook struct {
@@ -712,7 +721,7 @@ type ClientPlayerPositionAndLook struct {
 	OnGround bool    // True if the client is on the ground, False otherwise
 }
 
-func (ClientPlayerPositionAndLook) Id(PktDisp) uint { return 0x06 }
+func (ClientPlayerPositionAndLook) Id() (uint, uint) { return PktInvalid, 0x06 }
 
 // 0x07 = Player Digging
 type PlayerDigging struct {
@@ -723,7 +732,7 @@ type PlayerDigging struct {
 	Face   int8  // The face being hit (see below)
 }
 
-func (PlayerDigging) Id(PktDisp) uint { return 0x07 }
+func (PlayerDigging) Id() (uint, uint) { return PktInvalid, 0x07 }
 
 // 0x08 = Player Block Placement
 type PlayerBlockPlacement struct {
@@ -737,14 +746,14 @@ type PlayerBlockPlacement struct {
 	CursorPositionZ int8
 }
 
-func (PlayerBlockPlacement) Id(PktDisp) uint { return 0x08 }
+func (PlayerBlockPlacement) Id() (uint, uint) { return PktInvalid, 0x08 }
 
 // 0x09 = Held Item Change
 type ClientHeldItemChange struct {
 	Slot int16 // The slot which the player has selected (0-8)
 }
 
-func (ClientHeldItemChange) Id(PktDisp) uint { return 0x09 }
+func (ClientHeldItemChange) Id() (uint, uint) { return PktInvalid, 0x09 }
 
 // 0x0A = Animation
 type ClientAnimation struct {
@@ -752,7 +761,7 @@ type ClientAnimation struct {
 	Animation int8  // Animation ID
 }
 
-func (ClientAnimation) Id(PktDisp) uint { return 0x0A }
+func (ClientAnimation) Id() (uint, uint) { return PktInvalid, 0x0A }
 
 // 0x0B = Entity Action
 type EntityAction struct {
@@ -761,7 +770,7 @@ type EntityAction struct {
 	JumpBoost int32 // Horse jump boost. Ranged from 0 -> 100.
 }
 
-func (EntityAction) Id(PktDisp) uint { return 0x0B }
+func (EntityAction) Id() (uint, uint) { return PktInvalid, 0x0B }
 
 // 0x0C = Steer Vehicle
 type SteerVehicle struct {
@@ -771,7 +780,7 @@ type SteerVehicle struct {
 	Unmount  bool // True when leaving the vehicle
 }
 
-func (SteerVehicle) Id(PktDisp) uint { return 0x0C }
+func (SteerVehicle) Id() (uint, uint) { return PktInvalid, 0x0C }
 
 // 0x0E = Click Window
 type ClickWindow struct {
@@ -783,7 +792,7 @@ type ClickWindow struct {
 	ClickedItem  Slot
 }
 
-func (ClickWindow) Id(PktDisp) uint { return 0x0E }
+func (ClickWindow) Id() (uint, uint) { return PktInvalid, 0x0E }
 
 // 0x10 = Creative Inventory Action
 type CreativeInventoryAction struct {
@@ -791,7 +800,7 @@ type CreativeInventoryAction struct {
 	ClickedItem Slot
 }
 
-func (CreativeInventoryAction) Id(PktDisp) uint { return 0x10 }
+func (CreativeInventoryAction) Id() (uint, uint) { return PktInvalid, 0x10 }
 
 // 0x11 = Enchant Item
 type EnchantItem struct {
@@ -799,14 +808,14 @@ type EnchantItem struct {
 	Enchantment int8 // The position of the enchantment on the enchantment table window, starting with 0 as the topmost one.
 }
 
-func (EnchantItem) Id(PktDisp) uint { return 0x11 }
+func (EnchantItem) Id() (uint, uint) { return PktInvalid, 0x11 }
 
 // 0x14 = Tab-Complete
 type TabCompleteRequest struct {
 	Text string
 }
 
-func (TabCompleteRequest) Id(PktDisp) uint { return 0x14 }
+func (TabCompleteRequest) Id() (uint, uint) { return PktInvalid, 0x14 }
 
 // 0x15 = Client Settings
 type ClientSettings struct {
@@ -818,79 +827,13 @@ type ClientSettings struct {
 	ShowCape     bool   // Client-side "show cape" option
 }
 
-func (ClientSettings) Id(PktDisp) uint { return 0x15 }
+func (ClientSettings) Id() (uint, uint) { return PktInvalid, 0x15 }
 
 // 0x16 = Client Status
 type ClientStatus struct {
 	ActionID int8 // See below
 }
 
-func (ClientStatus) Id(PktDisp) uint { return 0x16 }
+func (ClientStatus) Id() (uint, uint) { return PktInvalid, 0x16 }
 
 ////////////////////////////////////////////////////////////////////////////////
-
-// types used by packets
-
-type XYZ8 struct {
-	X, Y, Z int8
-}
-
-type Slot struct {
-	// TODO
-}
-
-type ObjectData struct {
-	// TODO
-}
-
-type PropertyData struct {
-	// TODO
-}
-
-type Record struct {
-	// TODO
-}
-
-type EntityMetadata struct {
-	Raw []byte
-}
-
-func (d *EntityMetadata) MarshalPacket(k *PacketEncoder) {
-	p := k.Get(len(d.Raw))
-	if p != nil {
-		copy(p, d.Raw)
-	}
-	k.PutUint8(0x7f)
-}
-func (d *EntityMetadata) UnmarshalPacket(k *PacketDecoder) {
-	b := k.Get(1)
-	if b == nil || b[0] == 0x7f {
-		return
-	}
-	d.Raw = b
-	for {
-		if b = k.Get(1); b == nil || b[0] == 0x7f {
-			return
-		}
-		d.Raw = d.Raw[:len(d.Raw)+1]
-	}
-}
-
-type MapChunkBulkMeta struct {
-	ChunkX        int32  // The X Coordinate of the chunk
-	ChunkZ        int32  // The Z Coordinate of the chunk
-	PrimaryBitmap uint16 // A bitmap which specifies which sections are not empty in this chunk
-	AddBitmap     uint16 // A bitmap which specifies which sections need add information because of very high block ids. not yet used
-}
-
-type StatisticsEntry struct {
-	Name  string // https://gist.github.com/thinkofdeath/a1842c21a0cf2e1fb5e0
-	Value int    // The amount to set it to
-}
-
-func bound(d PktDisp, cb, sb uint) uint {
-	if d.D == Clientbound {
-		return cb
-	}
-	return sb
-}

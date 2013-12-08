@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"unicode"
@@ -12,7 +13,6 @@ import (
 var (
 	ErrBufferOverflow  = errors.New("Buffer overflow")
 	ErrBufferUnderflow = errors.New("Buffer underflo")
-	ErrUnknownArray    = errors.New("Unknown array")
 
 	endian = binary.BigEndian
 )
@@ -100,6 +100,9 @@ func (d *PacketDecoder) Get(size int) []byte {
 	panic(nil)
 	return nil
 }
+func (d *PacketDecoder) Len() int {
+	return len(d.data) - d.pos
+}
 func (d *PacketDecoder) Int64() int64 {
 	if p := d.Get(8); p != nil {
 		return int64(endian.Uint64(p))
@@ -173,46 +176,91 @@ func (d *PacketDecoder) String() string {
 	b := d.Get(int(d.Uvarint()))
 	return string(b)
 }
+func (d *PacketDecoder) Float64() float64 {
+	if p := d.Get(8); p != nil {
+		return math.Float64frombits(endian.Uint64(p))
+	}
+	return 0
+}
+func (d *PacketDecoder) Float32() float32 {
+	if p := d.Get(4); p != nil {
+		return math.Float32frombits(endian.Uint32(p))
+	}
+	return 0
+}
 
 func (d *PacketDecoder) ArrayLength(t reflect.StructTag) int {
 	switch lenTag(t) {
+	case "int32div4":
+		return int(d.Int32()) / 4
 	case "int32":
 		return int(d.Int32())
 	case "int16":
 		return int(d.Int16())
-	case "int":
-		return int(d.Uvarint())
+	case "int8":
+		return int(d.Int8())
 	}
-	d.err = ErrUnknownArray
-	return 0
+	return int(d.Uvarint())
+}
+
+func (d *PacketDecoder) decodeSimple(i interface{}, tag reflect.StructTag) bool {
+	switch t := i.(type) {
+	case *bool:
+		*t = d.Bool()
+	case *int64:
+		*t = d.Int64()
+	case *int32:
+		*t = d.Int32()
+	case *int16:
+		*t = d.Int16()
+	case *int8:
+		*t = d.Int8()
+	case *uint64:
+		*t = d.Uint64()
+	case *uint32:
+		*t = d.Uint32()
+	case *uint16:
+		*t = d.Uint16()
+	case *uint8:
+		*t = d.Uint8()
+	case *int:
+		*t = d.Varint()
+	case *uint:
+		*t = d.Uvarint()
+	case *string:
+		*t = d.String()
+	case *float32:
+		*t = d.Float32()
+	case *float64:
+		*t = d.Float64()
+	case *[]byte:
+		l := d.ArrayLength(tag)
+		*t = d.Get(l)
+	default:
+		return false
+	}
+	return true
 }
 
 func (d *PacketDecoder) decodeValue(v reflect.Value, tag reflect.StructTag) {
+	for v.Kind() == reflect.Ptr {
+		if v.IsNil() {
+			v.Set(reflect.New(v.Type().Elem()))
+		}
+		v = v.Elem()
+	}
+	if v.CanAddr() {
+		i := v.Addr().Interface()
+		if d.decodeSimple(i, tag) {
+			return
+		}
+		if m, ok := i.(PacketUnmarshaler); ok {
+			m.UnmarshalPacket(d)
+			return
+		}
+	}
+
 	switch v.Kind() {
-	case reflect.Bool:
-		v.SetBool(d.Bool())
-	case reflect.Int64:
-		v.SetInt(int64(d.Int64()))
-	case reflect.Uint64:
-		v.SetUint(uint64(d.Uint64()))
-	case reflect.Int32:
-		v.SetInt(int64(d.Int32()))
-	case reflect.Uint32:
-		v.SetUint(uint64(d.Uint32()))
-	case reflect.Int16:
-		v.SetInt(int64(d.Int16()))
-	case reflect.Uint16:
-		v.SetUint(uint64(d.Uint16()))
-	case reflect.Int8:
-		v.SetInt(int64(d.Int8()))
-	case reflect.Uint8:
-		v.SetUint(uint64(d.Uint8()))
-	case reflect.Int:
-		v.SetInt(int64(d.Varint()))
-	case reflect.Uint:
-		v.SetUint(uint64(d.Uvarint()))
-	case reflect.String:
-		v.SetString(d.String())
 	case reflect.Struct:
 		for i := 0; i < v.NumField(); i++ {
 			d.decodeValue(v.Field(i), v.Type().Field(i).Tag)
@@ -220,23 +268,32 @@ func (d *PacketDecoder) decodeValue(v reflect.Value, tag reflect.StructTag) {
 	case reflect.Slice:
 		l := d.ArrayLength(tag)
 		et := v.Type().Elem()
-		var av reflect.Value
 		switch et.Kind() {
 		case reflect.Uint8:
-			av = reflect.ValueOf(d.Get(l)).Convert(v.Type())
+			v.SetBytes(d.Get(l))
 		case reflect.Uint32:
 			s := make([]uint32, l)
 			for i := 0; i < l; i++ {
 				s[i] = d.Uint32()
 			}
-			av = reflect.ValueOf(s).Convert(v.Type())
+			v.Set(reflect.ValueOf(s).Convert(v.Type()))
 		default:
-			av = reflect.MakeSlice(et, l, l)
+			av := reflect.MakeSlice(reflect.SliceOf(et), l, l)
 			for i := 0; i < l; i++ {
 				d.decodeValue(av.Index(i), tag)
 			}
+			v.Set(av)
 		}
-		v.Set(av)
+	case reflect.Array:
+		l := v.Len()
+		switch v.Type().Elem().Kind() {
+		case reflect.Uint8:
+			reflect.Copy(v.Slice(0, l), reflect.ValueOf(d.Get(l)))
+		default:
+			for i := 0; i < l; i++ {
+				d.decodeValue(v.Index(i), tag)
+			}
+		}
 	default:
 		fmt.Println(v)
 		panic("can't decode")
@@ -244,10 +301,10 @@ func (d *PacketDecoder) decodeValue(v reflect.Value, tag reflect.StructTag) {
 }
 
 func (d *PacketDecoder) Decode(i interface{}) {
-	if m, ok := i.(PacketUnmarshaler); ok {
-		m.UnmarshalPacket(d)
+	v := reflect.ValueOf(i)
+	if v.Kind() != reflect.Ptr {
 	}
-	d.decodeValue(reflect.ValueOf(i).Elem(), "")
+	d.decodeValue(v, "")
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -342,6 +399,16 @@ func (e *PacketEncoder) PutUvarint(i uint) {
 	e.pos = len(e.data)
 	e.err = ErrBufferUnderflow
 }
+func (e *PacketEncoder) PutFloat64(v float64) {
+	if p := e.Get(8); p != nil {
+		endian.PutUint64(p, math.Float64bits(v))
+	}
+}
+func (e *PacketEncoder) PutFloat32(v float32) {
+	if p := e.Get(4); p != nil {
+		endian.PutUint32(p, math.Float32bits(v))
+	}
+}
 func (e *PacketEncoder) PutString(s string) {
 	e.PutUvarint(uint(len(s)))
 	if p := e.Get(len(s)); p != nil {
@@ -351,41 +418,75 @@ func (e *PacketEncoder) PutString(s string) {
 
 func (e *PacketEncoder) PutArrayLength(t reflect.StructTag, i int) {
 	switch lenTag(t) {
+	case "int32div4":
+		e.PutInt32(int32(i) * 4)
 	case "int32":
 		e.PutInt32(int32(i))
 	case "int16":
 		e.PutInt16(int16(i))
-	case "int":
-		e.PutUvarint(uint(i))
+	case "int8":
+		e.PutInt8(int8(i))
 	default:
-		e.err = ErrUnknownArray
+		e.PutUvarint(uint(i))
 	}
 }
 
+func (e *PacketEncoder) encodeSimple(i interface{}, tag reflect.StructTag) bool {
+	switch t := i.(type) {
+	case int64:
+		e.PutInt64(t)
+	case int32:
+		e.PutInt32(t)
+	case int16:
+		e.PutInt16(t)
+	case int8:
+		e.PutInt8(t)
+	case uint64:
+		e.PutUint64(t)
+	case uint32:
+		e.PutUint32(t)
+	case uint16:
+		e.PutUint16(t)
+	case uint8:
+		e.PutUint8(t)
+	case int:
+		e.PutVarint(t)
+	case uint:
+		e.PutUvarint(t)
+	case float32:
+		e.PutFloat32(t)
+	case float64:
+		e.PutFloat64(t)
+	case string:
+		e.PutString(t)
+	case []byte:
+		e.PutArrayLength(tag, len(t))
+		if p := e.Get(len(t)); p != nil {
+			copy(p, t)
+		}
+	default:
+		return false
+	}
+	return true
+}
+
 func (e *PacketEncoder) encodeValue(v reflect.Value, tag reflect.StructTag) {
+	for v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+	if v.CanInterface() {
+		if e.encodeSimple(v.Interface(), tag) {
+			return
+		}
+	}
+	if v.CanAddr() {
+		if m, ok := v.Addr().Interface().(PacketMarshaler); ok {
+			m.MarshalPacket(e)
+			return
+		}
+	}
+
 	switch v.Kind() {
-	case reflect.Ptr:
-		e.encodeValue(v.Elem(), tag)
-	case reflect.Bool:
-		e.PutBool(v.Bool())
-	case reflect.Int64:
-		e.PutInt64(v.Int())
-	case reflect.Uint64:
-		e.PutUint64(v.Uint())
-	case reflect.Int32:
-		e.PutInt32(int32(v.Int()))
-	case reflect.Uint32:
-		e.PutUint32(uint32(v.Uint()))
-	case reflect.Int16:
-		e.PutInt16(int16(v.Int()))
-	case reflect.Uint16:
-		e.PutUint16(uint16(v.Uint()))
-	case reflect.Int:
-		e.PutVarint(int(v.Int()))
-	case reflect.Uint:
-		e.PutUvarint(uint(v.Uint()))
-	case reflect.String:
-		e.PutString(v.String())
 	case reflect.Struct:
 		for i := 0; i < v.NumField(); i++ {
 			e.encodeValue(v.Field(i), v.Type().Field(i).Tag)
@@ -397,12 +498,24 @@ func (e *PacketEncoder) encodeValue(v reflect.Value, tag reflect.StructTag) {
 		switch et.Kind() {
 		case reflect.Uint8:
 			if p := e.Get(l); p != nil {
-				copy(p, v.Interface().([]byte))
+				copy(p, v.Bytes())
 			}
 		case reflect.Uint32:
 			s := v.Interface().([]uint32)
 			for i := 0; i < l; i++ {
 				e.PutUint32(s[i])
+			}
+		default:
+			for i := 0; i < l; i++ {
+				e.encodeValue(v.Index(i), tag)
+			}
+		}
+	case reflect.Array:
+		l := v.Len()
+		switch v.Type().Elem().Kind() {
+		case reflect.Uint8:
+			if p := e.Get(l); p != nil {
+				copy(p, v.Slice(0, l).Bytes())
 			}
 		default:
 			for i := 0; i < l; i++ {
@@ -416,8 +529,5 @@ func (e *PacketEncoder) encodeValue(v reflect.Value, tag reflect.StructTag) {
 }
 
 func (e *PacketEncoder) Encode(i interface{}) {
-	if m, ok := i.(PacketMarshaler); ok {
-		m.MarshalPacket(e)
-	}
 	e.encodeValue(reflect.ValueOf(i), "")
 }

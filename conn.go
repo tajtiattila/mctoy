@@ -3,7 +3,9 @@ package main
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +20,9 @@ type Conn struct {
 	wbuf    []byte
 	rbufsiz int
 	state   CxnState
+	pkxi    [2]uint
+	pkxo    PktDir // for inbound Packets, client:0 server:1
+	logger  *log.Logger
 }
 
 const (
@@ -55,22 +60,67 @@ func (c *Conn) dial(addr string) error {
 
 	c.state = StateHandshake
 
+	c.pkxo = Clientbound
+
+	c.logger = log.New(os.Stdout, "cxn", log.LstdFlags)
+
 	return nil
+}
+
+func (c *Conn) inboundPacketId(p Packet) uint {
+	c.pkxi[0], c.pkxi[1] = p.Id()
+	return c.pkxi[int(c.pkxo)]
+}
+
+func (c *Conn) outboundPacketId(p Packet) uint {
+	c.pkxi[0], c.pkxi[1] = p.Id()
+	return c.pkxi[1-int(c.pkxo)]
 }
 
 func (c *Conn) InitIO(secret []byte) {
 	c.r, c.w = InitPacketIO(c.c, secret)
 }
 
-func (c *Conn) Send(p Packet) error {
+func (c *Conn) Send(p Packet) (err error) {
 	pkc := MakePacketEncoder(c.wbuf)
-	pkc.PutUvarint(p.Id(PktDisp{S: c.state, D: Serverbound}))
+	id := c.outboundPacketId(p)
+	if err = CheckPacket(c.state, 1-c.pkxo, id); err != nil {
+		c.logger.Print(err)
+	}
+	pkc.PutUvarint(id)
 	pkc.Encode(p)
 	if pkc.Error() != nil {
 		return pkc.Error()
 	}
-	_, err := c.w.Write(pkc.Bytes())
+	_, err = c.w.Write(pkc.Bytes())
 	return err
+}
+
+func (c *Conn) Run() (err error) {
+	var (
+		p    Packet
+		name string
+	)
+	for {
+		if err = c.Scan(); err != nil {
+			return
+		}
+		id, ok := c.PeekId()
+		if ok {
+			fmt.Printf("%0x: ", id)
+		}
+		if p, name, err = c.Read(); err != nil {
+			return
+		}
+		fmt.Println(name)
+		if k, ok := p.(*KeepAlive); ok {
+			if err = c.Send(k); err != nil {
+				return err
+			}
+			continue
+		}
+		fmt.Printf("%#v\n\n", p)
+	}
 }
 
 func (c *Conn) Scan() error {
@@ -84,8 +134,11 @@ func (c *Conn) PeekId() (uint, bool) {
 func (c *Conn) Peek(p Packet) (err error) {
 	pkc := MakePacketDecoder(c.r.Bytes())
 	id := pkc.Uvarint()
-	if p.Id(PktDisp{S: c.state, D: Clientbound}) != id {
+	if c.inboundPacketId(p) != id {
 		return ErrPacketMismatch
+	}
+	if err = CheckPacket(c.state, c.pkxo, id); err != nil {
+		c.logger.Print(err)
 	}
 	pkc.Decode(p)
 	if err == nil {
@@ -99,6 +152,23 @@ func (c *Conn) Recv(p Packet) (err error) {
 	if err == nil {
 		err = c.Peek(p)
 	}
+	return
+}
+
+func (c *Conn) Read() (p Packet, n string, err error) {
+	id, ok := c.PeekId()
+	if !ok {
+		panic("missing packet id")
+	}
+	if p, n, err = NewPacket(c.state, c.pkxo, id); err != nil {
+		return
+	}
+	/*
+		d := MakeDumper(os.Stdout)
+		d.line(fmt.Sprint("Read ", len(c.r.Bytes()), " bytes"), nil)
+		d.bytes(c.r.Bytes())
+	*/
+	err = c.Peek(p)
 	return
 }
 

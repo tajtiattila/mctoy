@@ -59,7 +59,7 @@ func (c *ClientConn) ServerStatus() (*ServerStatus, error) {
 	}
 
 	s := new(ServerStatus)
-	err = json.Unmarshal([]byte(string(sr)), s)
+	err = json.Unmarshal([]byte(sr.JSON), s)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +146,7 @@ func (c *ClientConn) Login(up UserPassworder) error {
 		if err = c.Peek(&d); err != nil {
 			return err
 		}
-		fmt.Println("LoginDisconnect:", string(d))
+		fmt.Println("LoginDisconnect:", d.Reason)
 		return ErrLoginFailed
 	default:
 		fmt.Println("Unexpected packet received, id:", pkid)
@@ -157,6 +157,7 @@ func (c *ClientConn) Login(up UserPassworder) error {
 			return err
 		}
 		fmt.Println("Login successful")
+		c.state = StatePlay
 	}
 
 	return nil

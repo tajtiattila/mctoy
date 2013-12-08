@@ -13,7 +13,7 @@ type Handshake struct {
 	NextState       uint
 }
 
-func (Handshake) Id(PktDisp) uint { return 0x00 }
+func (Handshake) Id() (uint, uint) { return PktInvalid, 0x00 }
 
 // StateStatus
 ////////////////////////////////////////////////////////////////////////////////
@@ -21,22 +21,21 @@ func (Handshake) Id(PktDisp) uint { return 0x00 }
 type StatusRequest struct{}
 
 // 0x00 ->Server
-func (StatusRequest) Id(PktDisp) uint { return 0x00 }
+func (StatusRequest) Id() (uint, uint) { return PktInvalid, 0x00 }
 
-type StatusResponse string
+type StatusResponse struct {
+	JSON string
+}
 
-/*type StatusResponse struct {
-	JsonData string
-}*/
 // 0x00 ->Client
-func (StatusResponse) Id(PktDisp) uint { return 0x00 }
+func (StatusResponse) Id() (uint, uint) { return 0x00, PktInvalid }
 
 type StatusPing struct {
 	// 0x01 ->Server ->Client
 	Time int64
 }
 
-func (StatusPing) Id(PktDisp) uint { return 0x01 }
+func (StatusPing) Id() (uint, uint) { return 0x01, 0x01 }
 
 // StateLogin
 ////////////////////////////////////////////////////////////////////////////////
@@ -46,11 +45,13 @@ type LoginStart struct {
 	Name string
 }
 
-func (LoginStart) Id(PktDisp) uint { return 0x00 }
+func (LoginStart) Id() (uint, uint) { return PktInvalid, 0x00 }
 
-type LoginDisconnect string
+type LoginDisconnect struct {
+	Reason string
+}
 
-func (LoginDisconnect) Id(PktDisp) uint { return 0x00 }
+func (LoginDisconnect) Id() (uint, uint) { return 0x00, PktInvalid }
 
 type LoginSuccess struct {
 	// 0x02 ->Client
@@ -58,7 +59,7 @@ type LoginSuccess struct {
 	Username string
 }
 
-func (LoginSuccess) Id(PktDisp) uint { return 0x02 }
+func (LoginSuccess) Id() (uint, uint) { return 0x02, PktInvalid }
 
 type EncryptionRequest struct {
 	// 0x01 ->Server
@@ -67,7 +68,7 @@ type EncryptionRequest struct {
 	VerifyToken []byte `mc:"len=int16"`
 }
 
-func (EncryptionRequest) Id(PktDisp) uint { return 0x01 }
+func (EncryptionRequest) Id() (uint, uint) { return 0x01, PktInvalid }
 
 type EncryptionResponse struct {
 	// 0x01 ->Client
@@ -75,14 +76,4 @@ type EncryptionResponse struct {
 	VerifyToken  []byte `mc:"len=int16"`
 }
 
-func (EncryptionResponse) Id(PktDisp) uint { return 0x01 }
-
-// StatePlay
-////////////////////////////////////////////////////////////////////////////////
-
-type KeepAlive struct {
-	// 0x00 ->Server ->Client
-	KeepAliveID int32
-}
-
-func (KeepAlive) Id(PktDisp) uint { return 0x00 }
+func (EncryptionResponse) Id() (uint, uint) { return PktInvalid, 0x01 }

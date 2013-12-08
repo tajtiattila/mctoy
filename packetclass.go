@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"reflect"
 )
 
@@ -15,27 +16,108 @@ const (
 	StatePlay      CxnState = 3
 )
 
-type Direction byte
-
-const (
-	Clientbound Direction = 1
-	Serverbound Direction = 2
-)
-
-type PktDisp struct {
-	S CxnState
-	D Direction
+func CxnStateString(s CxnState) string {
+	switch s {
+	case StateHandshake:
+		return "Handshake"
+	case StateStatus:
+		return "Status"
+	case StateLogin:
+		return "Login"
+	case StatePlay:
+		return "Play"
+	}
+	return fmt.Sprint("UnknownState#", int(s))
 }
 
+const PktInvalid uint = ^uint(0)
+
+// Packet is used to communicate between
+// a client and a server
 type Packet interface {
-	Id(PktDisp) uint
+	// return the packet Id when
+	// sending to client or server
+	Id() (idClientbound, idServerbound uint)
+}
+
+type PktDir int
+
+const (
+	Clientbound PktDir = 0
+	Serverbound PktDir = 1
+)
+
+func PktDirString(p PktDir) string {
+	if p == Clientbound {
+		return "clientbound"
+	} else {
+		return "serverbound"
+	}
+}
+
+type ErrInvalidState int
+
+func (e ErrInvalidState) Error() string {
+	return fmt.Sprintf("Invalid state=%d", int(e))
+}
+
+type ErrInvalidPacket struct {
+	state CxnState
+	dir   PktDir
+	id    uint
+}
+
+func (e *ErrInvalidPacket) Error() string {
+	return fmt.Sprintf(
+		"Invalid %s packet id %02x for state %s",
+		PktDirString(e.dir),
+		e.id,
+		CxnStateString(e.state))
+}
+
+func CheckPacket(state CxnState, dir PktDir, id uint) error {
+	if state < StateHandshake || StatePlay < state {
+		return ErrInvalidState(state)
+	}
+	piv := packets[state].get(dir)
+	if int(id) < len(piv) && piv[id] != nil {
+		return nil
+	}
+	return &ErrInvalidPacket{state, dir, id}
+}
+
+func NewPacket(state CxnState, dir PktDir, id uint) (Packet, string, error) {
+	if state < StateHandshake || StatePlay < state {
+		return nil, "", ErrInvalidState(state)
+	}
+	piv := packets[state].get(dir)
+	if int(id) < len(piv) && piv[id] != nil {
+		return piv[id].New(), piv[id].Name, nil
+	}
+	return nil, "", &ErrInvalidPacket{state, dir, id}
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
 type stateInfo struct {
-	ClientToServer []packetInfo
-	ServerToClient []packetInfo
+	ClientToServer []*packetInfo
+	ServerToClient []*packetInfo
+}
+
+func (si *stateInfo) get(d PktDir) []*packetInfo {
+	if d == Clientbound {
+		return si.ServerToClient
+	} else {
+		return si.ClientToServer
+	}
+}
+
+func (si *stateInfo) set(d PktDir, b []*packetInfo) {
+	if d == Clientbound {
+		si.ServerToClient = b
+	} else {
+		si.ClientToServer = b
+	}
 }
 
 type packetInfo struct {
@@ -188,43 +270,42 @@ var packetinit = []stateInit{
 	},
 }
 
-func addPacketInfo(d PktDisp, pfn pktfn) {
-	v := packets[d.S]
+func addPacketInfo(s CxnState, d PktDir, pfn pktfn) {
+	v := packets[s]
 	if v == nil {
 		v = new(stateInfo)
-		packets[d.S] = v
-	}
-	var vv []packetInfo
-	if d.D == Serverbound {
-		vv = v.ClientToServer
-	} else {
-		vv = v.ServerToClient
+		packets[s] = v
 	}
 	packet := pfn()
-	id := packet.Id(d)
+	cbid, sbid := packet.Id()
+	var id uint
+	if d == Serverbound {
+		id = sbid
+	} else {
+		id = cbid
+	}
 	name := reflect.ValueOf(packet).Elem().Type().Name()
+
+	vv := v.get(d)
 	if cap(vv) <= int(id) {
 		n := int(id) + 1
-		vvn := make([]packetInfo, n*3/2+1)
+		vvn := make([]*packetInfo, n*3/2+1)
 		copy(vvn, vv)
 		vv = vvn
+		v.set(d, vv)
 	}
-	vv[int(id)] = packetInfo{id, name, pfn}
-	if d.D == Serverbound {
-		v.ClientToServer = vv
-	} else {
-		v.ServerToClient = vv
-	}
+
+	vv[int(id)] = &packetInfo{id, name, pfn}
 }
 
 func init() {
 	packets = make([]*stateInfo, 4)
 	for s, si := range packetinit {
 		for _, pi := range si.ServerToClient {
-			addPacketInfo(PktDisp{S: CxnState(s), D: Clientbound}, pi.New)
+			addPacketInfo(CxnState(s), Clientbound, pi.New)
 		}
 		for _, pi := range si.ClientToServer {
-			addPacketInfo(PktDisp{S: CxnState(s), D: Serverbound}, pi.New)
+			addPacketInfo(CxnState(s), Serverbound, pi.New)
 		}
 	}
 }

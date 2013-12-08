@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/tajtiattila/passwdprompt"
+	"os"
 )
 
 var (
@@ -31,13 +32,23 @@ func main() {
 
 	c, err := Connect(addr, NewConfigStore("auth", cfg))
 	if err != nil {
-		panic(err)
+		fail(err)
 	}
 
 	err = c.Login(UserPassworderFunc(func() (u, p string, err error) {
 		return passwdprompt.GetUserPassword("Username: ", "Password: ")
 	}))
 	if err != nil {
-		panic(err)
+		fail(err)
 	}
+
+	err = c.Run()
+	if err != nil {
+		fail(err)
+	}
+}
+
+func fail(err error) {
+	fmt.Println(err)
+	os.Exit(0)
 }
