@@ -160,6 +160,13 @@ func (c *Conn) Read() (p Packet, n string, err error) {
 	return
 }
 
+func (c *Conn) ReadNext() (p Packet, n string, err error) {
+	if err = c.Scan(); err != nil {
+		return
+	}
+	return c.Read()
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 
 type PacketHandler interface {

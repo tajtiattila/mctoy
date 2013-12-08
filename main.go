@@ -6,24 +6,70 @@ import (
 	mcnet "github.com/tajtiattila/mctoy/net"
 	"github.com/tajtiattila/passwdprompt"
 	"os"
+	"sync"
+	"time"
 )
 
 var (
 	server = flag.String("addr", "", "Minecraft server address")
 )
 
-type playHandler struct{}
+type DemoHandler struct {
+	mtx        sync.Mutex
+	responder  bool
+	PlayerID   int32
+	X, Y, Z    float64
+	Yaw, Pitch float32
+	OnGround   bool
+}
 
-func (*playHandler) HandlePacket(
+func (h *DemoHandler) SendPosition(c *mcnet.Conn) error {
+	h.mtx.Lock()
+	defer h.mtx.Unlock()
+	if h.PlayerID == 0 {
+		// not joined yet
+		return nil
+	}
+	return c.Send(&mcnet.ClientPlayerPositionAndLook{
+		X:        h.X,
+		Y:        h.Y,
+		Z:        h.Z,
+		Stance:   2.0,
+		Yaw:      h.Yaw,
+		Pitch:    h.Pitch,
+		OnGround: h.OnGround,
+	})
+}
+
+func (h *DemoHandler) HandlePacket(
 	c *mcnet.Conn,
 	pkid uint,
 	pkname string,
 	pk mcnet.Packet,
 ) (err error) {
+	h.mtx.Lock()
+	defer h.mtx.Unlock()
 	fmt.Printf("%02x %s\n", pkid, pkname)
-	if k, ok := pk.(*mcnet.KeepAlive); ok {
-		err = c.Send(k)
+	switch p := pk.(type) {
+	case *mcnet.KeepAlive:
+		err = c.Send(p)
 		return
+	case *mcnet.JoinGame:
+		h.PlayerID = p.EntityID
+	case *mcnet.ServerPlayerPositionAndLook:
+		h.X, h.Y, h.Z = p.X, p.Y, p.Z
+		h.Yaw, h.Pitch = p.Yaw, p.Pitch
+		h.OnGround = p.OnGround
+	case *mcnet.MapChunkBulk:
+		if !h.responder {
+			h.responder = true
+			go func() {
+				for _ = range time.Tick(time.Second / 20) {
+					err := h.SendPosition(c)
+					fmt.Println("-> SendPosition:", err)
+				}
+			}()
+		}
 	}
 	//fmt.Printf("%#v\n\n", pk)
 	return
@@ -48,19 +94,25 @@ func main() {
 	addr := cfg.Value("server")
 	fmt.Println("Connecting", addr)
 
-	c, err := mcnet.Connect(addr, NewConfigStore("auth", cfg))
+	c, err := mcnet.Connect(addr)
 	if err != nil {
 		fail(err)
 	}
 
-	err = c.Login(mcnet.UserPassworderFunc(func() (u, p string, err error) {
-		return passwdprompt.GetUserPassword("Username: ", "Password: ")
-	}))
+	var a mcnet.Auth
+	a = mcnet.NewYggAuth(
+		NewConfigStore("auth", cfg),
+		mcnet.UserPassworderFunc(func() (u, p string, err error) {
+			return passwdprompt.GetUserPassword("Username: ", "Password: ")
+		}),
+	)
+	a = mcnet.NewNoAuth("Sándorvagyok")
+	err = c.Login(a)
 	if err != nil {
 		fail(err)
 	}
 
-	err = c.Run(&playHandler{})
+	err = c.Run(&DemoHandler{})
 	if err != nil {
 		fail(err)
 	}

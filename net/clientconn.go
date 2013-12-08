@@ -9,7 +9,6 @@ import (
 
 type ClientConn struct {
 	Conn
-	perstor PersistentStore // used by YggAuth
 }
 
 var (
@@ -17,8 +16,8 @@ var (
 	ErrLoginFailed = errors.New("Login failed")
 )
 
-func Connect(addr string, s PersistentStore) (c *ClientConn, err error) {
-	nc := &ClientConn{perstor: s}
+func Connect(addr string) (c *ClientConn, err error) {
+	nc := &ClientConn{}
 	if err = nc.dial(addr); err == nil {
 		c = nc
 	}
@@ -26,7 +25,7 @@ func Connect(addr string, s PersistentStore) (c *ClientConn, err error) {
 }
 
 func NewServerStatus(addr string) (*ServerStatus, error) {
-	c, err := Connect(addr, nil)
+	c, err := Connect(addr)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +86,7 @@ func (c *ClientConn) Ping() (t time.Duration, err error) {
 	return
 }
 
-func (c *ClientConn) Login(up UserPassworder) error {
+func (c *ClientConn) Login(auth Auth) error {
 	/*
 		C->S : Handshake State=2
 		C->S : Login Start
@@ -105,59 +104,51 @@ func (c *ClientConn) Login(up UserPassworder) error {
 		return err
 	}
 
-	ygg := NewYggAuth(c.perstor)
-	if err = ygg.Start(up); err != nil {
+	if err = auth.Start(); err != nil {
 		return err
 	}
 
-	err = c.Send(LoginStart{ygg.ProfileName()})
+	c.state = StateLogin
+
+	err = c.Send(LoginStart{auth.ProfileName()})
 	if err != nil {
 		return err
 	}
 
-	var erq EncryptionRequest
-	if err = c.Recv(&erq); err != nil {
-		return err
-	}
-
-	session, err := ygg.JoinSession(erq.ServerId, erq.PublicKey)
+	p, _, err := c.ReadNext()
 	if err != nil {
 		return err
 	}
 
-	c.Send(EncryptionResponse{
-		SharedSecret: session.Cipher.Encrypt(session.SharedSecret),
-		VerifyToken:  session.Cipher.Encrypt(erq.VerifyToken),
-	})
-
-	c.InitIO(session.SharedSecret)
-
-	if err = c.Scan(); err != nil {
-		return err
-	}
-	pkid, ok := c.PeekId()
-	if !ok {
-		return ErrNoResponse
-	}
-
-	switch pkid {
-	case 0x00:
-		var d LoginDisconnect
-		if err = c.Peek(&d); err != nil {
+	if erq, ok := p.(*EncryptionRequest); ok {
+		session, err := auth.JoinSession(erq.ServerId, erq.PublicKey)
+		if err != nil {
 			return err
 		}
-		fmt.Println("LoginDisconnect:", d.Reason)
-		return ErrLoginFailed
-	default:
-		fmt.Println("Unexpected packet received, id:", pkid)
-		return ErrLoginFailed
-	case 0x02:
-		var ls LoginSuccess
-		if err = c.Peek(&ls); err != nil {
+
+		c.Send(EncryptionResponse{
+			SharedSecret: session.Cipher.Encrypt(session.SharedSecret),
+			VerifyToken:  session.Cipher.Encrypt(erq.VerifyToken),
+		})
+
+		c.InitIO(session.SharedSecret)
+
+		if p, _, err = c.ReadNext(); err != nil {
 			return err
 		}
+	}
+
+	switch pkt := p.(type) {
+	case *LoginSuccess:
 		fmt.Println("Login successful")
 		c.state = StatePlay
+	case *LoginDisconnect:
+		fmt.Println("LoginDisconnect:", pkt.Reason)
+		err = ErrLoginFailed
+	default:
+		pkid, _ := c.PeekId()
+		fmt.Println("Unexpected packet received, id:", pkid)
+		err = ErrLoginFailed
 	}
 
 	return nil

@@ -19,6 +19,12 @@ import (
 	"strings"
 )
 
+type Auth interface {
+	ProfileName() string
+	Start() error
+	JoinSession(serverIdString string, publicKey []byte) (*SessionInfo, error)
+}
+
 // UserPassworder can return a username and password
 // if requested, possibly prompting the user
 type UserPassworder interface {
@@ -38,6 +44,19 @@ func UserPassworderFunc(f func() (user, password string, err error)) UserPasswor
 	return &userPassworderFunc{f}
 }
 */
+
+////////////////////////////////////////////////////////////////////////////////
+
+type NoAuth struct {
+	PlayerName string
+}
+
+func NewNoAuth(n string) Auth {
+	return &NoAuth{n}
+}
+func (a *NoAuth) ProfileName() string                            { return a.PlayerName }
+func (*NoAuth) Start() error                                     { return nil }
+func (*NoAuth) JoinSession(string, []byte) (*SessionInfo, error) { return nil, nil }
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -78,12 +97,13 @@ type PersistentStore interface {
 // on disk, only client and access tokens that can be refreshed.
 type YggAuth struct {
 	store PersistentStore
+	up    UserPassworder
 	info  AuthInfo
 }
 
 // create
-func NewYggAuth(s PersistentStore) *YggAuth {
-	y := &YggAuth{store: s}
+func NewYggAuth(s PersistentStore, up UserPassworder) Auth {
+	y := &YggAuth{store: s, up: up}
 	err := y.store.Load(&y.info)
 	if err != nil {
 		log.Println(err)
@@ -101,7 +121,7 @@ func (y *YggAuth) ProfileName() string {
 // The Start utility function tries to Validate or
 // refresh the given token. It uses the provided UserPassworder
 // if there are no cached tokens or they cannot be refreshed.
-func (y *YggAuth) Start(up UserPassworder) error {
+func (y *YggAuth) Start() error {
 	// try validate first
 	if y.Validate() == nil {
 		return nil
@@ -112,7 +132,7 @@ func (y *YggAuth) Start(up UserPassworder) error {
 		return nil
 	}
 	// else ask the user for her credentials
-	user, passwd, err := up.UserPassword()
+	user, passwd, err := y.up.UserPassword()
 	if err != nil {
 		return err
 	}

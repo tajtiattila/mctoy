@@ -163,7 +163,7 @@ var packetinit = []stateInit{
 	// StateLogin
 	{
 		ServerToClient: []packetInit{
-			{func() Packet { return new(Disconnect) }},
+			{func() Packet { return new(LoginDisconnect) }},
 			{func() Packet { return new(EncryptionRequest) }},
 			{func() Packet { return new(LoginSuccess) }},
 		},
