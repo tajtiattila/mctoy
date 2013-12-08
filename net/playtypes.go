@@ -11,21 +11,21 @@ type XYZint struct {
 }
 
 type Slot struct {
-	ItemBlockId uint16
-	ItemCount   byte
-	ItemDamage  uint16
-	Data        []byte // optional gzip'd NBT data
+	Id     uint16
+	Count  byte
+	Damage uint16
+	Tag    []byte // optional gzip'd NBT data
 }
 
 func (s *Slot) MarshalPacket(k *PacketEncoder) {
-	k.PutUint16(s.ItemBlockId)
-	if s.ItemBlockId != 0xffff {
-		k.PutUint8(s.ItemCount)
-		k.PutUint16(s.ItemDamage)
-		if len(s.Data) != 0 {
-			k.PutUint16(uint16(len(s.Data)))
-			if p := k.Get(len(s.Data)); p != nil {
-				copy(p, s.Data)
+	k.PutUint16(s.Id)
+	if s.Id != 0xffff {
+		k.PutUint8(s.Count)
+		k.PutUint16(s.Damage)
+		if len(s.Tag) != 0 {
+			k.PutUint16(uint16(len(s.Tag)))
+			if p := k.Get(len(s.Tag)); p != nil {
+				copy(p, s.Tag)
 			}
 		} else {
 			k.PutUint16(0xffff)
@@ -33,14 +33,14 @@ func (s *Slot) MarshalPacket(k *PacketEncoder) {
 	}
 }
 func (s *Slot) UnmarshalPacket(k *PacketDecoder) {
-	s.ItemBlockId = k.Uint16()
-	if s.ItemBlockId != 0xffff {
-		s.ItemCount = k.Uint8()
-		s.ItemDamage = k.Uint16()
+	s.Id = k.Uint16()
+	if s.Id != 0xffff {
+		s.Count = k.Uint8()
+		s.Damage = k.Uint16()
 		l := int(k.Uint16())
 		if l != 0 && l != 0xffff {
-			s.Data = make([]byte, l)
-			copy(s.Data, k.Get(l))
+			s.Tag = make([]byte, l)
+			copy(s.Tag, k.Get(l))
 		}
 	}
 }
@@ -77,7 +77,7 @@ type PropertyData struct {
 }
 
 type PropertyModifier struct {
-	UUID      [8]byte
+	UUID      [16]byte
 	Amount    float64
 	Operation byte
 }
@@ -94,13 +94,13 @@ func (d *EntityData) MarshalPacket(k *PacketEncoder) {
 	// todo
 }
 func (d *EntityData) UnmarshalPacket(k *PacketDecoder) {
-	d.Values = make([]interface{}, 16)
+	d.Values = make([]interface{}, 32)
 	for k.Len() > 0 {
 		b := k.Uint8()
 		if b == 0x7f {
 			break
 		}
-		typ, idx := int(b&0x1f), int((b&0xe0)>>5)
+		typ, idx := int((b&0xe0)>>5), int(b&0x1f)
 		switch typ {
 		case 0: // byte
 			d.Values[idx] = k.Int8()

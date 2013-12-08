@@ -458,6 +458,8 @@ func (e *PacketEncoder) encodeSimple(i interface{}, tag reflect.StructTag) bool 
 		e.PutFloat64(t)
 	case string:
 		e.PutString(t)
+	case bool:
+		e.PutBool(t)
 	case []byte:
 		e.PutArrayLength(tag, len(t))
 		if p := e.Get(len(t)); p != nil {
