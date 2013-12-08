@@ -1,6 +1,6 @@
 // thank you, Toqueteos!
 // https://gist.github.com/toqueteos/5372776
-package main
+package net
 
 import (
 	"bufio"
@@ -65,6 +65,11 @@ func (y YggError) Error() string { return "Yggdrasil: " + string(y) }
 type yggPayload map[string]interface{}
 
 ////////////////////////////////////////////////////////////////////////////////
+
+type PersistentStore interface {
+	Save(interface{}) error
+	Load(interface{}) error
+}
 
 // YggAuth is a helper class to log in to a Minecraft server by performing
 // the necessary API requests to authserver.mojang.com and

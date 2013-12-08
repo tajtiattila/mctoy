@@ -16,11 +16,6 @@ import (
 	path "path/filepath"
 )
 
-type PersistentStore interface {
-	Save(interface{}) error
-	Load(interface{}) error
-}
-
 type ConfigStore struct {
 	Name   string
 	Config Config

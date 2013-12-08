@@ -1,10 +1,11 @@
-package main
+package net
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 )
 
 const PACKETDEBUG = false
@@ -108,4 +109,8 @@ func dumpJson(i interface{}) string {
 		return string(d)
 	}
 	return string(buf.Bytes())
+}
+
+func dumpBytes(b []byte) {
+	MakeDumper(os.Stdout).bytes(b)
 }

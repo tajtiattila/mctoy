@@ -1,4 +1,4 @@
-package main
+package net
 
 // StatePlay
 ////////////////////////////////////////////////////////////////////////////////
@@ -113,16 +113,16 @@ func (ServerAnimation) Id() (uint, uint) { return 0x0B, PktInvalid }
 
 // 0x0C = Spawn Player
 type SpawnPlayer struct {
-	EntityID    uint           // Player's Entity ID
-	PlayerUUID  string         // Player's UUID
-	PlayerName  string         // Player's Name
-	X           int32          // Player X as a [[Data_Types#Fixed-point_numbers|Fixed-Point number]]
-	Y           int32          // Player X as a [[Data_Types#Fixed-point_numbers|Fixed-Point number]]
-	Z           int32          // Player X as a [[Data_Types#Fixed-point_numbers|Fixed-Point number]]
-	Yaw         int8           // Player rotation as a packed byte
-	Pitch       int8           // Player rotation as a packet byte
-	CurrentItem int16          // The item the player is currently holding. Note that this should be 0 for "no item", unlike -1 used in other packets. A negative value crashes clients.
-	Metadata    EntityMetadata // The client will crash if no metadata is sent
+	EntityID    uint       // Player's Entity ID
+	PlayerUUID  string     // Player's UUID
+	PlayerName  string     // Player's Name
+	X           int32      // Player X as a [[Data_Types#Fixed-point_numbers|Fixed-Point number]]
+	Y           int32      // Player X as a [[Data_Types#Fixed-point_numbers|Fixed-Point number]]
+	Z           int32      // Player X as a [[Data_Types#Fixed-point_numbers|Fixed-Point number]]
+	Yaw         int8       // Player rotation as a packed byte
+	Pitch       int8       // Player rotation as a packet byte
+	CurrentItem int16      // The item the player is currently holding. Note that this should be 0 for "no item", unlike -1 used in other packets. A negative value crashes clients.
+	Metadata    EntityData // The client will crash if no metadata is sent
 }
 
 func (SpawnPlayer) Id() (uint, uint) { return 0x0C, PktInvalid }
@@ -162,7 +162,7 @@ type SpawnMob struct {
 	VelocityX int16
 	VelocityY int16
 	VelocityZ int16
-	Metadata  EntityMetadata
+	Metadata  EntityData
 }
 
 func (SpawnMob) Id() (uint, uint) { return 0x0F, PktInvalid }
@@ -283,9 +283,9 @@ type AttachEntity struct {
 func (AttachEntity) Id() (uint, uint) { return 0x1B, PktInvalid }
 
 // 0x1C = Entity Metadata
-type EntityMetadataInfo struct {
+type EntityMetadata struct {
 	EntityID int32 // Entity's ID
-	Metadata EntityMetadata
+	Metadata EntityData
 }
 
 func (EntityMetadata) Id() (uint, uint) { return 0x1C, PktInvalid }

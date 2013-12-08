@@ -1,4 +1,4 @@
-package main
+package net
 
 import (
 	"errors"
@@ -96,7 +96,7 @@ func (c *Conn) Send(p Packet) (err error) {
 	return err
 }
 
-func (c *Conn) Run() (err error) {
+func (c *Conn) Run(h PacketHandler) (err error) {
 	var (
 		p    Packet
 		name string
@@ -105,21 +105,11 @@ func (c *Conn) Run() (err error) {
 		if err = c.Scan(); err != nil {
 			return
 		}
-		id, ok := c.PeekId()
-		if ok {
-			fmt.Printf("%0x: ", id)
-		}
+		id, _ := c.PeekId()
 		if p, name, err = c.Read(); err != nil {
 			return
 		}
-		fmt.Println(name)
-		if k, ok := p.(*KeepAlive); ok {
-			if err = c.Send(k); err != nil {
-				return err
-			}
-			continue
-		}
-		fmt.Printf("%#v\n\n", p)
+		h.HandlePacket(c, id, name, p)
 	}
 }
 
@@ -142,7 +132,10 @@ func (c *Conn) Peek(p Packet) (err error) {
 	}
 	pkc.Decode(p)
 	if err == nil {
-		err = pkc.Error()
+		if err = pkc.Error(); err != nil {
+			fmt.Printf("! packet %02x: %s\n", id, err)
+			dumpBytes(c.r.Bytes())
+		}
 	}
 	return
 }
@@ -163,13 +156,14 @@ func (c *Conn) Read() (p Packet, n string, err error) {
 	if p, n, err = NewPacket(c.state, c.pkxo, id); err != nil {
 		return
 	}
-	/*
-		d := MakeDumper(os.Stdout)
-		d.line(fmt.Sprint("Read ", len(c.r.Bytes()), " bytes"), nil)
-		d.bytes(c.r.Bytes())
-	*/
 	err = c.Peek(p)
 	return
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+type PacketHandler interface {
+	HandlePacket(c *Conn, pkid uint, pkname string, pk Packet) error
 }
 
 ////////////////////////////////////////////////////////////////////////////////

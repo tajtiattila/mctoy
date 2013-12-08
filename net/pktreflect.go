@@ -1,4 +1,4 @@
-package main
+package net
 
 import (
 	"encoding/binary"
@@ -97,7 +97,6 @@ func (d *PacketDecoder) Get(size int) []byte {
 	}
 	d.pos = len(d.data)
 	d.err = ErrBufferOverflow
-	panic(nil)
 	return nil
 }
 func (d *PacketDecoder) Len() int {
