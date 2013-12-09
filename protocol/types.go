@@ -91,9 +91,39 @@ type Record uint32 // Bitmask
 type Metadata map[int]interface{}
 
 func (d Metadata) MarshalPacket(k *Coder) {
-	// todo
+	for i, v := range d {
+		b := k.Get(1)
+		var typ byte
+		switch t := v.(type) {
+		case int8:
+			typ = 0
+			k.PutInt8(t)
+		case int16:
+			typ = 1
+			k.PutInt16(t)
+		case int32:
+			typ = 2
+			k.PutInt32(t)
+		case float32:
+			typ = 3
+			k.PutFloat32(t)
+		case string:
+			typ = 4
+			k.PutString(t)
+		case *Slot:
+			typ = 5
+			t.MarshalPacket(k)
+		case *XYZint:
+			typ = 6
+			k.PutInt32(int32(t.X))
+			k.PutInt32(int32(t.Y))
+			k.PutInt32(int32(t.Z))
+		}
+		b[0] = (typ << 5) | byte(i&0x1f)
+	}
 	k.PutUint8(0x7f)
 }
+
 func (d Metadata) UnmarshalPacket(k *Coder) {
 	d = make(Metadata)
 	for k.Len() > 0 {

@@ -195,7 +195,7 @@ func makeSliceCoder(tags tagMap, rt reflect.Type) (tc typeCoder) {
 		}
 	} else {
 		rte := rt.Elem()
-		elc := compileType(tags, rte)
+		elc := cacheType(rte)
 		if !elc.valid() {
 			panic("can't en/decode slice element: " + rte.String())
 		}
@@ -204,14 +204,14 @@ func makeSliceCoder(tags tagMap, rt reflect.Type) (tc typeCoder) {
 			lenc.rf(reflect.ValueOf(&l).Elem(), c)
 			l /= d
 			v.Set(reflect.MakeSlice(rt, l, l))
-			for i := 0; i < l; l++ {
+			for i := 0; i < l; i++ {
 				elc.rf(v.Index(i), c)
 			}
 		}
 		tc.wf = func(c *Coder, v reflect.Value) {
 			l := v.Len() * d
 			lenc.wf(c, reflect.ValueOf(l))
-			for i := 0; i < l; l++ {
+			for i := 0; i < l; i++ {
 				elc.wf(c, v.Index(i))
 			}
 		}

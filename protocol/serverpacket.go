@@ -102,7 +102,7 @@ type SpawnPlayer struct {
 	Yaw         int8   // Player rotation as a packed byte
 	Pitch       int8   // Player rotation as a packet byte
 	CurrentItem int16  // The item the player is currently holding. Note that this should be 0 for "no item", unlike -1 used in other packets. A negative value crashes clients.
-	Metadata
+	Values      Metadata
 }
 
 // 0x0D = Collect Item
@@ -136,7 +136,7 @@ type SpawnMob struct {
 	VelocityX int16
 	VelocityY int16
 	VelocityZ int16
-	Metadata
+	Values    Metadata
 }
 
 // 0x10 = Spawn Painting
@@ -233,7 +233,7 @@ type AttachEntity struct {
 // 0x1C = Entity Metadata
 type EntityMetadata struct {
 	EntityID int32 // Entity's ID
-	Metadata
+	Values   Metadata
 }
 
 // 0x1D = Entity Effect
