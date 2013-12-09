@@ -22,9 +22,8 @@ type Conn struct {
 	host   string
 	port   int
 	c      net.Conn
-	r      *PacketScanner
-	rb     *bufio.Reader
-	w      *PacketWriter
+	r      *bufio.Reader
+	w      io.Writer
 	rbuf   []byte
 	wbuf   []byte
 	wmtx   sync.Mutex
@@ -74,39 +73,34 @@ func (c *Conn) Send(p interface{}) (err error) {
 	if WHATPKT {
 		dumpPacketId("", p, "->")
 	}
-	_, err = c.w.Write(c.wbuf[:n])
+	nl := binary.PutUvarint(c.wbuf[n:], uint64(n))
+	_, err = c.w.Write(c.wbuf[n : n+nl])
+	if err == nil {
+		_, err = c.w.Write(c.wbuf[:n])
+	}
 	return
 }
 
 func (c *Conn) Recv() (p interface{}, err error) {
 	var l uint64
-	if l, err = binary.ReadUvarint(c.rb); err != nil {
+	if l, err = binary.ReadUvarint(c.r); err != nil {
 		return
 	}
 	if len(c.rbuf) < int(l) {
 		c.rbuf = make([]byte, len(c.rbuf)+int(l))
 	}
 	b := c.rbuf[:int(l)]
-	if _, err = io.ReadFull(c.rb, b); err != nil {
+	if _, err = io.ReadFull(c.r, b); err != nil {
 		return
-	}
-	/*
-		if err = c.r.Scan(); err != nil {
-			return
-		}
-		b := c.r.Bytes()
-	*/
-	if WHATPKT {
-		dumpBytes(b)
 	}
 	hs := proto.GetHostState(c.ht, c.state)
 	if hs == nil {
 		return nil, ErrStateInvalid
 	}
-	if WHATPKT {
+	p, err = hs.Decode(b)
+	if err != nil {
 		dumpBytes(b)
 	}
-	p, err = hs.Decode(b)
 	if WHATPKT {
 		dumpPacketId("<-", p, "")
 	}
@@ -149,8 +143,9 @@ func (c *Conn) dial(addr string) error {
 }
 
 func (c *Conn) InitIO(secret []byte) {
-	c.r, c.w = InitPacketIO(c.c, secret)
-	c.rb = bufio.NewReader(c.r.rd)
+	var r io.Reader
+	r, c.w = InitPacketIO(c.c, secret)
+	c.r = bufio.NewReader(r)
 }
 
 type PacketHandler interface {
@@ -179,7 +174,7 @@ func (s *ServerStatus) String() string {
 // create a PacketScanner and PacketWriter for the given io.ReadWriter,
 // typically a net.Conn instance. Argument secret is used to set up
 // AES/CFB8 encryption, in case it is nil, no encryption is used.
-func InitPacketIO(h io.ReadWriter, secret []byte) (*PacketScanner, *PacketWriter) {
+func InitPacketIO(h io.ReadWriter, secret []byte) (io.Reader, io.Writer) {
 	var (
 		sr io.Reader
 		sw io.Writer
@@ -203,5 +198,5 @@ func InitPacketIO(h io.ReadWriter, secret []byte) (*PacketScanner, *PacketWriter
 	if PACKETDEBUG {
 		sr, sw = NewDebugReader(sr, os.Stdout), NewDebugWriter(sw, os.Stdout)
 	}
-	return NewPacketScanner(sr), NewPacketWriter(sw)
+	return sr, sw
 }
