@@ -1,28 +1,37 @@
 package net
 
 import (
+	"bufio"
+	"crypto/aes"
+	"crypto/cipher"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	proto "github.com/tajtiattila/mctoy/protocol"
+	"io"
 	"log"
 	"net"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 type Conn struct {
-	host    string
-	port    int
-	c       net.Conn
-	r       *PacketScanner
-	w       *PacketWriter
-	wbuf    []byte
-	rbufsiz int
-	state   CxnState
-	pkxi    [2]uint
-	pkxo    PktDir // for inbound Packets, client:0 server:1
-	logger  *log.Logger
+	host   string
+	port   int
+	c      net.Conn
+	r      *PacketScanner
+	rb     *bufio.Reader
+	w      *PacketWriter
+	rbuf   []byte
+	wbuf   []byte
+	wmtx   sync.Mutex
+	state  proto.CxnState
+	pkxi   [2]uint
+	ht     proto.HostType // server:0 client:1
+	logger *log.Logger
 }
 
 const (
@@ -32,7 +41,79 @@ const (
 var (
 	ErrPacketMismatch    = errors.New("Packet id mismatch")
 	ErrServerAddrInvalid = errors.New("Server address invalid")
+	ErrStateInvalid      = errors.New("State invalid")
 )
+
+func (c *Conn) Run(h PacketHandler) error {
+	for {
+		p, err := c.Recv()
+		if err != nil {
+			return err
+		}
+
+		if err = h.HandlePacket(c, p); err != nil {
+			return err
+		}
+	}
+}
+
+const WHATPKT = true
+
+func (c *Conn) Send(p interface{}) (err error) {
+	hs := proto.GetHostState(c.ht, c.state)
+	if hs == nil {
+		return ErrStateInvalid
+	}
+	var n int
+	c.wmtx.Lock()
+	defer c.wmtx.Unlock()
+	n, err = hs.Encode(c.wbuf, p)
+	if err != nil {
+		return err
+	}
+	if WHATPKT {
+		dumpPacketId("", p, "->")
+	}
+	_, err = c.w.Write(c.wbuf[:n])
+	return
+}
+
+func (c *Conn) Recv() (p interface{}, err error) {
+	var l uint64
+	if l, err = binary.ReadUvarint(c.rb); err != nil {
+		return
+	}
+	if len(c.rbuf) < int(l) {
+		c.rbuf = make([]byte, len(c.rbuf)+int(l))
+	}
+	b := c.rbuf[:int(l)]
+	if _, err = io.ReadFull(c.rb, b); err != nil {
+		return
+	}
+	/*
+		if err = c.r.Scan(); err != nil {
+			return
+		}
+		b := c.r.Bytes()
+	*/
+	if WHATPKT {
+		dumpBytes(b)
+	}
+	hs := proto.GetHostState(c.ht, c.state)
+	if hs == nil {
+		return nil, ErrStateInvalid
+	}
+	if WHATPKT {
+		dumpBytes(b)
+	}
+	p, err = hs.Decode(b)
+	if WHATPKT {
+		dumpPacketId("<-", p, "")
+	}
+	return
+}
+
+////////////////////////////////////////////////////////////////////////////////
 
 func (c *Conn) dial(addr string) error {
 
@@ -54,123 +135,26 @@ func (c *Conn) dial(addr string) error {
 	if err != nil {
 		return err
 	}
+	c.rbuf = make([]byte, connBufLen)
 	c.wbuf = make([]byte, connBufLen)
 
 	c.InitIO(nil)
 
-	c.state = StateHandshake
-
-	c.pkxo = Clientbound
+	c.ht = proto.Client
+	c.state = proto.StateHandshake
 
 	c.logger = log.New(os.Stdout, "cxn", log.LstdFlags)
 
 	return nil
 }
 
-func (c *Conn) inboundPacketId(p Packet) uint {
-	c.pkxi[0], c.pkxi[1] = p.Id()
-	return c.pkxi[int(c.pkxo)]
-}
-
-func (c *Conn) outboundPacketId(p Packet) uint {
-	c.pkxi[0], c.pkxi[1] = p.Id()
-	return c.pkxi[1-int(c.pkxo)]
-}
-
 func (c *Conn) InitIO(secret []byte) {
 	c.r, c.w = InitPacketIO(c.c, secret)
+	c.rb = bufio.NewReader(c.r.rd)
 }
-
-func (c *Conn) Send(p Packet) (err error) {
-	pkc := MakePacketEncoder(c.wbuf)
-	id := c.outboundPacketId(p)
-	if err = CheckPacket(c.state, 1-c.pkxo, id); err != nil {
-		c.logger.Print(err)
-	}
-	pkc.PutUvarint(id)
-	pkc.Encode(p)
-	if pkc.Error() != nil {
-		return pkc.Error()
-	}
-	_, err = c.w.Write(pkc.Bytes())
-	return err
-}
-
-func (c *Conn) Run(h PacketHandler) (err error) {
-	var (
-		p    Packet
-		name string
-	)
-	for {
-		if err = c.Scan(); err != nil {
-			return
-		}
-		id, _ := c.PeekId()
-		if p, name, err = c.Read(); err != nil {
-			return
-		}
-		h.HandlePacket(c, id, name, p)
-	}
-}
-
-func (c *Conn) Scan() error {
-	return c.r.Scan()
-}
-
-func (c *Conn) PeekId() (uint, bool) {
-	return c.r.PacketId()
-}
-
-func (c *Conn) Peek(p Packet) (err error) {
-	pkc := MakePacketDecoder(c.r.Bytes())
-	id := pkc.Uvarint()
-	if c.inboundPacketId(p) != id {
-		return ErrPacketMismatch
-	}
-	if err = CheckPacket(c.state, c.pkxo, id); err != nil {
-		c.logger.Print(err)
-	}
-	pkc.Decode(p)
-	if err == nil {
-		if err = pkc.Error(); err != nil {
-			fmt.Printf("! packet %02x: %s\n", id, err)
-			dumpBytes(c.r.Bytes())
-		}
-	}
-	return
-}
-
-func (c *Conn) Recv(p Packet) (err error) {
-	err = c.r.Scan()
-	if err == nil {
-		err = c.Peek(p)
-	}
-	return
-}
-
-func (c *Conn) Read() (p Packet, n string, err error) {
-	id, ok := c.PeekId()
-	if !ok {
-		panic("missing packet id")
-	}
-	if p, n, err = NewPacket(c.state, c.pkxo, id); err != nil {
-		return
-	}
-	err = c.Peek(p)
-	return
-}
-
-func (c *Conn) ReadNext() (p Packet, n string, err error) {
-	if err = c.Scan(); err != nil {
-		return
-	}
-	return c.Read()
-}
-
-////////////////////////////////////////////////////////////////////////////////
 
 type PacketHandler interface {
-	HandlePacket(c *Conn, pkid uint, pkname string, pk Packet) error
+	HandlePacket(c *Conn, pk interface{}) error
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -190,4 +174,34 @@ type ServerStatus struct {
 
 func (s *ServerStatus) String() string {
 	return fmt.Sprintf("%s %d/%d %s %s", s.Version.Name, s.Players.Online, s.Players.Max, s.Ping, s.Description)
+}
+
+// create a PacketScanner and PacketWriter for the given io.ReadWriter,
+// typically a net.Conn instance. Argument secret is used to set up
+// AES/CFB8 encryption, in case it is nil, no encryption is used.
+func InitPacketIO(h io.ReadWriter, secret []byte) (*PacketScanner, *PacketWriter) {
+	var (
+		sr io.Reader
+		sw io.Writer
+	)
+	if secret == nil {
+		sr, sw = h, h
+	} else {
+		aesc, err := aes.NewCipher(secret)
+		if err != nil {
+			panic(err)
+		}
+		sr = cipher.StreamReader{
+			R: h,
+			S: NewCFB8Decrypter(aesc, secret),
+		}
+		sw = cipher.StreamWriter{
+			W: h,
+			S: NewCFB8Encrypter(aesc, secret),
+		}
+	}
+	if PACKETDEBUG {
+		sr, sw = NewDebugReader(sr, os.Stdout), NewDebugWriter(sw, os.Stdout)
+	}
+	return NewPacketScanner(sr), NewPacketWriter(sw)
 }

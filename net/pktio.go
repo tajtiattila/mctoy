@@ -2,47 +2,14 @@ package net
 
 import (
 	"bufio"
-	"crypto/aes"
-	"crypto/cipher"
 	"encoding/binary"
 	"errors"
 	"io"
-	"os"
 )
 
 var (
 	ErrBufferShort = errors.New("Buffer insufficient for packet")
 )
-
-// create a PacketScanner and PacketWriter for the given io.ReadWriter,
-// typically a net.Conn instance. Argument secret is used to set up
-// AES/CFB8 encryption, in case it is nil, no encryption is used.
-func InitPacketIO(h io.ReadWriter, secret []byte) (*PacketScanner, *PacketWriter) {
-	var (
-		sr io.Reader
-		sw io.Writer
-	)
-	if secret == nil {
-		sr, sw = h, h
-	} else {
-		aesc, err := aes.NewCipher(secret)
-		if err != nil {
-			panic(err)
-		}
-		sr = cipher.StreamReader{
-			R: h,
-			S: NewCFB8Decrypter(aesc, secret),
-		}
-		sw = cipher.StreamWriter{
-			W: h,
-			S: NewCFB8Encrypter(aesc, secret),
-		}
-	}
-	if PACKETDEBUG {
-		sr, sw = NewDebugReader(sr, os.Stdout), NewDebugWriter(sw, os.Stdout)
-	}
-	return NewPacketScanner(sr), NewPacketWriter(h)
-}
 
 type PacketScanner struct {
 	rd      io.Reader

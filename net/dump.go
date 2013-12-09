@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 )
 
 const PACKETDEBUG = false
@@ -113,4 +114,18 @@ func dumpJson(i interface{}) string {
 
 func dumpBytes(b []byte) {
 	MakeDumper(os.Stdout).bytes(b)
+}
+
+func dumpPacketId(pre string, p interface{}, suf string) {
+	ts := ""
+	if p == nil {
+		ts = "nil"
+	} else {
+		rt := reflect.TypeOf(p)
+		for rt.Kind() == reflect.Ptr {
+			rt = rt.Elem()
+		}
+		ts = rt.Name()
+	}
+	fmt.Print(pre, ts, suf, "\n")
 }

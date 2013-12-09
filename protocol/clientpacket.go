@@ -1,4 +1,4 @@
-package net
+package protocol
 
 // StatePlay
 ////////////////////////////////////////////////////////////////////////////////
@@ -8,22 +8,16 @@ type ClientChatMessage struct {
 	Message string
 }
 
-func (ClientChatMessage) Id() (uint, uint) { return PktInvalid, 0x01 }
-
 // 0x02 = Use Entity
 type UseEntity struct {
 	Target int32
 	Mouse  int8 // 0 = Left-click, 1 = Right-click
 }
 
-func (UseEntity) Id() (uint, uint) { return PktInvalid, 0x02 }
-
 // 0x03 = Player
 type Player struct {
 	OnGround bool // True if the client is on the ground, False otherwise
 }
-
-func (Player) Id() (uint, uint) { return PktInvalid, 0x03 }
 
 // 0x04 = Player Position
 type PlayerPosition struct {
@@ -34,16 +28,12 @@ type PlayerPosition struct {
 	OnGround bool    // True if the client is on the ground, False otherwise
 }
 
-func (PlayerPosition) Id() (uint, uint) { return PktInvalid, 0x04 }
-
 // 0x05 = Player Look
 type PlayerLook struct {
 	Yaw      float32 // Absolute rotation on the X Axis, in degrees
 	Pitch    float32 // Absolute rotation on the Y Axis, in degrees
 	OnGround bool    // True if the client is on the ground, False otherwise
 }
-
-func (PlayerLook) Id() (uint, uint) { return PktInvalid, 0x05 }
 
 // 0x06 = Player Position And Look
 type ClientPlayerPositionAndLook struct {
@@ -56,8 +46,6 @@ type ClientPlayerPositionAndLook struct {
 	OnGround bool    // True if the client is on the ground, False otherwise
 }
 
-func (ClientPlayerPositionAndLook) Id() (uint, uint) { return PktInvalid, 0x06 }
-
 // 0x07 = Player Digging
 type PlayerDigging struct {
 	Status int8  // The action the player is taking against the block (see below)
@@ -66,8 +54,6 @@ type PlayerDigging struct {
 	Z      int32 // Block position
 	Face   int8  // The face being hit (see below)
 }
-
-func (PlayerDigging) Id() (uint, uint) { return PktInvalid, 0x07 }
 
 // 0x08 = Player Block Placement
 type PlayerBlockPlacement struct {
@@ -81,22 +67,16 @@ type PlayerBlockPlacement struct {
 	CursorPositionZ int8
 }
 
-func (PlayerBlockPlacement) Id() (uint, uint) { return PktInvalid, 0x08 }
-
 // 0x09 = Held Item Change
 type ClientHeldItemChange struct {
 	Slot int16 // The slot which the player has selected (0-8)
 }
-
-func (ClientHeldItemChange) Id() (uint, uint) { return PktInvalid, 0x09 }
 
 // 0x0A = Animation
 type ClientAnimation struct {
 	EntityID  int32 // Player ID
 	Animation int8  // Animation ID
 }
-
-func (ClientAnimation) Id() (uint, uint) { return PktInvalid, 0x0A }
 
 // 0x0B = Entity Action
 type EntityAction struct {
@@ -105,8 +85,6 @@ type EntityAction struct {
 	JumpBoost int32 // Horse jump boost. Ranged from 0 -> 100.
 }
 
-func (EntityAction) Id() (uint, uint) { return PktInvalid, 0x0B }
-
 // 0x0C = Steer Vehicle
 type SteerVehicle struct {
 	Sideways float32 // Positive to the left of the player
@@ -114,8 +92,6 @@ type SteerVehicle struct {
 	Jump     bool
 	Unmount  bool // True when leaving the vehicle
 }
-
-func (SteerVehicle) Id() (uint, uint) { return PktInvalid, 0x0C }
 
 // 0x0E = Click Window
 type ClickWindow struct {
@@ -127,15 +103,11 @@ type ClickWindow struct {
 	ClickedItem  Slot
 }
 
-func (ClickWindow) Id() (uint, uint) { return PktInvalid, 0x0E }
-
 // 0x10 = Creative Inventory Action
 type CreativeInventoryAction struct {
 	Slot        int16 // Inventory slot
 	ClickedItem Slot
 }
-
-func (CreativeInventoryAction) Id() (uint, uint) { return PktInvalid, 0x10 }
 
 // 0x11 = Enchant Item
 type EnchantItem struct {
@@ -143,14 +115,10 @@ type EnchantItem struct {
 	Enchantment int8 // The position of the enchantment on the enchantment table window, starting with 0 as the topmost one.
 }
 
-func (EnchantItem) Id() (uint, uint) { return PktInvalid, 0x11 }
-
 // 0x14 = Tab-Complete
 type TabCompleteRequest struct {
 	Text string
 }
-
-func (TabCompleteRequest) Id() (uint, uint) { return PktInvalid, 0x14 }
 
 // 0x15 = Client Settings
 type ClientSettings struct {
@@ -162,13 +130,7 @@ type ClientSettings struct {
 	ShowCape     bool   // Client-side "show cape" option
 }
 
-func (ClientSettings) Id() (uint, uint) { return PktInvalid, 0x15 }
-
 // 0x16 = Client Status
 type ClientStatus struct {
 	ActionID int8 // See below
 }
-
-func (ClientStatus) Id() (uint, uint) { return PktInvalid, 0x16 }
-
-////////////////////////////////////////////////////////////////////////////////

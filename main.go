@@ -4,9 +4,11 @@ import (
 	"flag"
 	"fmt"
 	mcnet "github.com/tajtiattila/mctoy/net"
+	proto "github.com/tajtiattila/mctoy/protocol"
 	"github.com/tajtiattila/passwdprompt"
 	"io"
 	"os"
+	"reflect"
 	"sync"
 	"time"
 )
@@ -32,7 +34,7 @@ func (h *DemoHandler) SendPosition(c *mcnet.Conn) error {
 		// not joined yet
 		return nil
 	}
-	return c.Send(&mcnet.ClientPlayerPositionAndLook{
+	return c.Send(proto.ClientPlayerPositionAndLook{
 		X:        h.X,
 		Y:        h.Y,
 		Z:        h.Z,
@@ -43,26 +45,21 @@ func (h *DemoHandler) SendPosition(c *mcnet.Conn) error {
 	})
 }
 
-func (h *DemoHandler) HandlePacket(
-	c *mcnet.Conn,
-	pkid uint,
-	pkname string,
-	pk mcnet.Packet,
-) (err error) {
+func (h *DemoHandler) HandlePacket(c *mcnet.Conn, pk interface{}) (err error) {
 	h.mtx.Lock()
 	defer h.mtx.Unlock()
-	fmt.Fprintf(h.log, "%02x %s\n", pkid, pkname)
+	fmt.Fprintln(h.log, reflect.TypeOf(pk))
 	switch p := pk.(type) {
-	case *mcnet.KeepAlive:
+	case *proto.KeepAlive:
 		err = c.Send(p)
 		return
-	case *mcnet.JoinGame:
+	case *proto.JoinGame:
 		h.PlayerID = p.EntityID
-	case *mcnet.ServerPlayerPositionAndLook:
+	case *proto.ServerPlayerPositionAndLook:
 		h.X, h.Y, h.Z = p.X, p.Y, p.Z
 		h.Yaw, h.Pitch = p.Yaw, p.Pitch
 		h.OnGround = p.OnGround
-	case *mcnet.MapChunkBulk:
+	case *proto.MapChunkBulk:
 		if !h.responder {
 			h.responder = true
 			go func() {
@@ -115,7 +112,7 @@ func main() {
 
 	h := &DemoHandler{log: NewRoundBuf()}
 	err = c.Run(h)
-	io.Copy(os.Stdout, h.log)
+	//io.Copy(os.Stdout, h.log)
 
 	if err != nil {
 		fail(err)

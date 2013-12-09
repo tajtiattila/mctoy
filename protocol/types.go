@@ -1,4 +1,8 @@
-package net
+package protocol
+
+import (
+	"reflect"
+)
 
 // types used by packets
 
@@ -17,7 +21,7 @@ type Slot struct {
 	Tag    []byte // optional gzip'd NBT data
 }
 
-func (s *Slot) MarshalPacket(k *PacketEncoder) {
+func (s *Slot) MarshalPacket(k *Coder) {
 	k.PutUint16(s.Id)
 	if s.Id != 0xffff {
 		k.PutUint8(s.Count)
@@ -32,7 +36,7 @@ func (s *Slot) MarshalPacket(k *PacketEncoder) {
 		}
 	}
 }
-func (s *Slot) UnmarshalPacket(k *PacketDecoder) {
+func (s *Slot) UnmarshalPacket(k *Coder) {
 	s.Id = k.Uint16()
 	if s.Id != 0xffff {
 		s.Count = k.Uint8()
@@ -53,7 +57,7 @@ type ObjectData struct {
 	SpeedZ   int16
 }
 
-func (o *ObjectData) MarshalPacket(k *PacketEncoder) {
+func (o *ObjectData) MarshalPacket(k *Coder) {
 	k.PutUint32(o.Data)
 	if o.HasSpeed {
 		k.PutInt16(o.SpeedX)
@@ -61,7 +65,7 @@ func (o *ObjectData) MarshalPacket(k *PacketEncoder) {
 		k.PutInt16(o.SpeedZ)
 	}
 }
-func (o *ObjectData) UnmarshalPacket(k *PacketDecoder) {
+func (o *ObjectData) UnmarshalPacket(k *Coder) {
 	o.Data = k.Uint32()
 	if o.HasSpeed = k.Len() > 0; o.HasSpeed {
 		o.SpeedX = k.Int16()
@@ -73,7 +77,7 @@ func (o *ObjectData) UnmarshalPacket(k *PacketDecoder) {
 type PropertyData struct {
 	Key          string
 	Value        float64
-	ModifierData []PropertyModifier `mc:"len=int16"` // http://www.minecraftwiki.net/wiki/Attribute#Modifiers
+	ModifierData []PropertyModifier `mc:"len=short"` // http://www.minecraftwiki.net/wiki/Attribute#Modifiers
 }
 
 type PropertyModifier struct {
@@ -82,19 +86,16 @@ type PropertyModifier struct {
 	Operation byte
 }
 
-type Record struct {
-	Bitmask uint32
-}
+type Record uint32 // Bitmask
 
-type EntityData struct {
-	Values []interface{}
-}
+type Metadata map[int]interface{}
 
-func (d *EntityData) MarshalPacket(k *PacketEncoder) {
+func (d Metadata) MarshalPacket(k *Coder) {
 	// todo
+	k.PutUint8(0x7f)
 }
-func (d *EntityData) UnmarshalPacket(k *PacketDecoder) {
-	d.Values = make([]interface{}, 32)
+func (d Metadata) UnmarshalPacket(k *Coder) {
+	d = make(Metadata)
 	for k.Len() > 0 {
 		b := k.Uint8()
 		if b == 0x7f {
@@ -103,25 +104,25 @@ func (d *EntityData) UnmarshalPacket(k *PacketDecoder) {
 		typ, idx := int((b&0xe0)>>5), int(b&0x1f)
 		switch typ {
 		case 0: // byte
-			d.Values[idx] = k.Int8()
+			d[idx] = k.Int8()
 		case 1: // short
-			d.Values[idx] = k.Int16()
+			d[idx] = k.Int16()
 		case 2: // int
-			d.Values[idx] = k.Int32()
+			d[idx] = k.Int32()
 		case 3: // float
-			d.Values[idx] = k.Float32()
+			d[idx] = k.Float32()
 		case 4: // string
-			d.Values[idx] = k.String()
+			d[idx] = k.String()
 		case 5: // slot
 			s := new(Slot)
 			s.UnmarshalPacket(k)
-			d.Values[idx] = s
+			d[idx] = s
 		case 6: // x,y,z
 			p := new(XYZint)
 			p.X = int(k.Int32())
 			p.Y = int(k.Int32())
 			p.X = int(k.Int32())
-			d.Values[idx] = p
+			d[idx] = p
 		}
 	}
 }
@@ -132,6 +133,8 @@ type MapChunkBulkMeta struct {
 	PrimaryBitmap uint16 // A bitmap which specifies which sections are not empty in this chunk
 	AddBitmap     uint16 // A bitmap which specifies which sections need add information because of very high block ids. not yet used
 }
+
+var mapChunkBulkMetaCoder = cacheType(reflect.TypeOf(MapChunkBulkMeta{}))
 
 type StatisticsEntry struct {
 	Name  string // https://gist.github.com/thinkofdeath/a1842c21a0cf2e1fb5e0
